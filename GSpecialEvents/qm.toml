@@ -1,0 +1,288 @@
+[manifest]
+version = "1.0.0"
+priority = 80
+
+# ============================================================================
+# MODULE REGISTRATIONS
+# ============================================================================
+
+[[patches]]
+[patches.module]
+source = "special_events_core.lua"
+before = "main.lua"
+name = "includes/special_events_core"
+
+[[patches]]
+[patches.module]
+source = "events/halloween.lua"
+before = "main.lua"
+name = "events/halloween"
+
+[[patches]]
+[patches.module]
+source = "events/xmas.lua"
+before = "main.lua"
+name = "events/xmas"
+
+[[patches]]
+[patches.module]
+source = "events/remembrance.lua"
+before = "main.lua"
+name = "events/remembrance"
+
+[[patches]]
+[patches.module]
+source = "events/general.lua"
+before = "main.lua"
+name = "events/general"
+
+# ============================================================================
+# 1. MAIN.LUA: Require special_events_core and initialize
+# ============================================================================
+
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+require "includes/special_events_core"
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+  SPECIAL_EVENTS = {"Brest","HoG","Aachen","Cologne"}
+  specialEventForDate(SPECIAL_EVENTS)
+'''
+position = "after"
+payload = '''
+  if SpecialEvents and SpecialEvents.init then
+    SpecialEvents.init()
+  end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "function specialEventForDate(floats)"
+position = "after"
+payload = '''
+  if SpecialEvents and SpecialEvents.getSelectedEvent then
+    local sel = SpecialEvents.getSelectedEvent()
+    if sel ~= "Auto" then
+      if sel == "None" then
+        _G.specialEvent = ""
+      else
+        _G.specialEvent = sel
+      end
+      return _G.specialEvent
+    end
+  end
+'''
+match_indent = true
+
+# ============================================================================
+# 2. INCLUDES/URB_ENGINE.LUA: Hostility helper, spawn wrapper, death hook, CQC
+# ============================================================================
+
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "function enemySomewhere(dude)"
+position = "before"
+payload = '''
+function isHostileTo(dude, target)
+  if SpecialEvents and SpecialEvents.isHostile then
+    return SpecialEvents.isHostile(dude, target)
+  end
+  if not dude or not target or dude.id == target.id then return false end
+  return dude.faction ~= target.faction
+end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+function enemySomewhere(dude)
+  local nearby = 0
+  for i=1, #player.deployedTroops, 1 do
+    if(player.deployedTroops[i].faction ~= dude.faction and player.deployedTroops[i].health > 10 and distanceCheck2(dude, player.deployedTroops[i]) < 1000 and player.deployedTroops[i].id ~= dude.id) then
+      nearby = nearby + 1
+    end
+  end
+  return nearby
+end
+'''
+position = "at"
+payload = '''
+function enemySomewhere(dude)
+  local nearby = 0
+  for i=1, #player.deployedTroops, 1 do
+    local tgt = player.deployedTroops[i]
+    if tgt and tgt.health > 10 and tgt.id ~= dude.id and isHostileTo(dude, tgt) and distanceCheck2(dude, tgt) < 1000 then
+      nearby = nearby + 1
+    end
+  end
+  return nearby
+end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "function spawnZombies(amount)"
+position = "after"
+payload = '''
+  if SpecialEvents and SpecialEvents.onSpawnZombies and SpecialEvents.onSpawnZombies(amount) then
+    return
+  end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "      dude.dead = 1"
+position = "after"
+payload = '''
+      if SpecialEvents and SpecialEvents.onDeath then
+        SpecialEvents.onDeath(dude)
+      end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "      local damage = randNbr(attacker.hthDamage)"
+position = "after"
+payload = '''
+      if SpecialEvents and SpecialEvents.onCqcHit then
+        SpecialEvents.onCqcHit(attacker, defender, damage)
+      end
+'''
+match_indent = true
+
+# ============================================================================
+# 3. INCLUDES/AI.LUA: 3-Way Targeting, zombie speed, and idle hunting
+# ============================================================================
+
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = "if(player.deployedTroops[u].faction ~= soldier.faction and player.deployedTroops[u].health > 10) then"
+position = "at"
+payload = "if(isHostileTo(soldier, player.deployedTroops[u]) and player.deployedTroops[u].health > 10) then"
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = "if target.faction ~= soldier.faction and target.health > 10 then"
+position = "at"
+payload = "if isHostileTo(soldier, target) and target.health > 10 then"
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = "if(player.deployedTroops[u].faction ~= player.deployedVehicles[i].faction and player.deployedTroops[u].health > 10) then"
+position = "at"
+payload = "if(isHostileTo(player.deployedVehicles[i], player.deployedTroops[u]) and player.deployedTroops[u].health > 10) then"
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = '''
+                if(soldier.tag == "zombie") then 
+                  if(enemySomewhere(soldier) <= 0) then 
+                    soldier.targetx = alliedFrontLine()
+                  end
+                end
+'''
+position = "at"
+payload = '''
+                if(soldier.tag == "zombie") then 
+                  if(enemySomewhere(soldier) <= 0) then 
+                    if not (SpecialEvents and SpecialEvents.onZombieIdle and SpecialEvents.onZombieIdle(soldier)) then
+                      soldier.targetx = alliedFrontLine()
+                    end
+                  end
+                end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = '''
+          local currentSpeed = player.deployedTroops[i].speed
+          if(player.deployedTroops[i].weapon ~= nil) then
+            currentSpeed = player.deployedTroops[i].speed  - player.deployedTroops[i].weapon.bulk
+          end
+'''
+position = "at"
+payload = '''
+          local currentSpeed = player.deployedTroops[i].speed
+          if player.deployedTroops[i].tag == "zombie" and SpecialEvents and SpecialEvents.getZombieSpeed then
+            currentSpeed = SpecialEvents.getZombieSpeed(player.deployedTroops[i])
+          end
+          if(player.deployedTroops[i].weapon ~= nil) then
+            currentSpeed = currentSpeed - player.deployedTroops[i].weapon.bulk
+          end
+'''
+match_indent = true
+
+# ============================================================================
+# 4. INCLUDES/MNB2.LUA: Configurable Wave Rising Chance
+# ============================================================================
+
+[[patches]]
+[patches.pattern]
+target = "includes/mnb2.lua"
+pattern = '''
+  if(specialEvent == "Halloween" and player.mnb2SubGame == 99) then 
+    if(randNbr(100) <= 10) then 
+      spawnZombies(math.ceil(player.currentWave/10)*2)
+    end
+  end
+'''
+position = "at"
+payload = '''
+  if(specialEvent == "Halloween" and player.mnb2SubGame == 99) then 
+    local zChance = (SpecialEvents and SpecialEvents.getWaveSpawnChance and SpecialEvents.getWaveSpawnChance()) or 10
+    if(randNbr(100) <= zChance) then 
+      spawnZombies(math.ceil(player.currentWave/10)*2)
+    end
+  end
+'''
+match_indent = true
+
+# ============================================================================
+# 5. INCLUDES/DRAWFILES.LUA: Update Loop Dispatcher
+# ============================================================================
+
+[[patches]]
+[patches.pattern]
+target = "includes/drawFiles.lua"
+pattern = '''
+  infantryUpdate(dt)
+  neutralsUpdate(dt)
+'''
+position = "at"
+payload = '''
+  infantryUpdate(dt)
+  if SpecialEvents and SpecialEvents.onUpdate then
+    SpecialEvents.onUpdate(dt)
+  end
+  neutralsUpdate(dt)
+'''
+match_indent = true

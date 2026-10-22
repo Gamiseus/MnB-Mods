@@ -1,0 +1,19 @@
+{
+  "id": "gcore",
+  "name": "GCore Modding Framework",
+  "version": "1.0.0",
+  "game_version": ">=0.9.1",
+  "authors": [
+    "Community Mod Team"
+  ],
+  "description": "Core runtime architecture, resolution independence / display scaling, high-performance raycast line-of-sight engine, and other fixes and optimizations.",
+  "category": "Core",
+  "tags": [
+    "Framework",
+    "Engine",
+    "Physics",
+    "Display"
+  ],
+  "load_priority": 90,
+  "entry_patch": "qm.toml"
+}

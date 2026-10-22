@@ -1,0 +1,252 @@
+[manifest]
+version = "1.0.0"
+priority = 50
+
+# 1. Enable console window in conf.lua
+[[patches]]
+[patches.pattern]
+target = "conf.lua"
+pattern = "t.console = false                  -- Attach a console (boolean, Windows only)"
+position = "at"
+payload = "t.console = true                   -- Attach a console (boolean, Windows only)"
+match_indent = true
+
+# 2. Inject F1 (AI Debug) and F2 (Dev Resources / Directives)
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+  if(key == "f1") then
+  --  spawnAmbulance() 
+    if(showAI == 0) then 
+      --buttonExplain()
+     --showAI = 1
+    else
+     -- player.textCue[#player.textCue+1] = {}
+     -- player.textCue[#player.textCue].name = "debugCue_showaiOff"
+     -- player.textCue[#player.textCue].x = player.screenx + 600
+     -- player.textCue[#player.textCue].y = 300
+      --player.textCue[#player.textCue].alpha = 255
+      showAI = 0
+     -- local clone_sfx4 
+     -- clone_sfx4 = gageDown:clone()
+     -- clone_sfx4:play()
+    end 
+  end
+'''
+position = "at"
+payload = '''
+  if(key == "f1") then
+    if(love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
+      buttonExplain()
+    end
+    if(showAI == 0) then 
+      player.textCue[#player.textCue+1] = {}
+      player.textCue[#player.textCue].name = "AI Debug ON"
+      player.textCue[#player.textCue].x = player.screenx + 600
+      player.textCue[#player.textCue].y = 300
+      player.textCue[#player.textCue].alpha = 255
+      showAI = 1
+      local clone_sfx4 
+      clone_sfx4 = gageUp:clone()
+      clone_sfx4:play()
+    else
+      player.textCue[#player.textCue+1] = {}
+      player.textCue[#player.textCue].name = "AI Debug OFF"
+      player.textCue[#player.textCue].x = player.screenx + 600
+      player.textCue[#player.textCue].y = 300
+      player.textCue[#player.textCue].alpha = 255
+      showAI = 0
+      local clone_sfx4 
+      clone_sfx4 = gageDown:clone()
+      clone_sfx4:play()
+    end 
+  end
+
+  if(key == "f2") then
+    if(love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
+      offerDirective(5)
+      player.textCue[#player.textCue+1] = {}
+      player.textCue[#player.textCue].name = "DEV: Directive Offered"
+      player.textCue[#player.textCue].x = player.screenx + 600
+      player.textCue[#player.textCue].y = 300
+      player.textCue[#player.textCue].alpha = 255
+    else
+      player.tp = (player.tp or 0) + 25
+      player.command = (player.command or 0) + 10
+      player.textCue[#player.textCue+1] = {}
+      player.textCue[#player.textCue].name = "DEV: +25 TP / +10 CMD"
+      player.textCue[#player.textCue].x = player.screenx + 600
+      player.textCue[#player.textCue].y = 300
+      player.textCue[#player.textCue].alpha = 255
+      local clone_sfx4
+      clone_sfx4 = gageUp:clone()
+      clone_sfx4:play()
+    end
+  end
+'''
+match_indent = true
+
+# 3. Inject Ctrl+F9 Tactical LOS benchmark
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = 'if(key == "f9") then'
+position = "before"
+payload = '''
+  if key == "f9" and (love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")) then
+    if los_physics and los_physics.runBenchmark then
+      local bMs, vMs, spd = los_physics.runBenchmark(vanilla_los, 2000)
+      player.textCue[#player.textCue+1] = {}
+      player.textCue[#player.textCue].name = string.format("LOS Bench: %.1fms vs %.1fms (%.1fx)", bMs, vMs, spd)
+      player.textCue[#player.textCue].x = player.screenx + 600
+      player.textCue[#player.textCue].y = 260
+      player.textCue[#player.textCue].alpha = 255
+    end
+  end
+'''
+match_indent = true
+
+# 4. Inject Dev Blast handler on right click
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+    if(devBlast == 1) then
+      --spawnSherman()
+'''
+position = "at"
+payload = '''
+    if(devBlast == 1) then
+      if(love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
+        alliedCargoDrop(x+player.screenx, 1)
+        player.lootables[#player.lootables+1] = {}
+        player.lootables[#player.lootables].name = "supplyCrate"
+        player.lootables[#player.lootables].x = x+player.screenx
+        player.lootables[#player.lootables].y = y+player.screeny
+        player.lootables[#player.lootables].flagged = 1
+        player.lootables[#player.lootables].faction = "allied"
+        player.lootables[#player.lootables].argument = ""
+        player.lootables[#player.lootables].size = 10
+        player.lootables[#player.lootables].life = 999
+        player.lootables[#player.lootables].rotation = math.rad(randNbr(360))
+      elseif(love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")) then
+        spawnSherman()
+        if(player.deployedVehicles[#player.deployedVehicles] ~= nil) then
+          player.deployedVehicles[#player.deployedVehicles].x = x+player.screenx
+          player.deployedVehicles[#player.deployedVehicles].y = y+player.screeny
+        end
+      else
+        p38Strike(x+player.screenx, y+player.screeny, 6)
+      end
+'''
+match_indent = true
+
+# 5. Inject F5-F8 dev controls
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+if(key == "f5") then
+  --spawnZombies(5)
+'''
+position = "at"
+payload = '''
+if(key == "f5") then
+  if(devBlast == 0) then 
+    player.textCue[#player.textCue+1] = {}
+    player.textCue[#player.textCue].name = "DEV Blast ON (R-Click)"
+    player.textCue[#player.textCue].x = player.screenx + 600
+    player.textCue[#player.textCue].y = 300
+    player.textCue[#player.textCue].alpha = 255
+    devBlast = 1
+    local clone_sfx4 
+    clone_sfx4 = gageUp:clone()
+    clone_sfx4:play()
+  else
+    player.textCue[#player.textCue+1] = {}
+    player.textCue[#player.textCue].name = "DEV Blast OFF"
+    player.textCue[#player.textCue].x = player.screenx + 600
+    player.textCue[#player.textCue].y = 300
+    player.textCue[#player.textCue].alpha = 255
+    devBlast = 0
+    local clone_sfx4 
+    clone_sfx4 = gageDown:clone()
+    clone_sfx4:play()
+  end
+end
+
+if(key == "f6") then
+  if(love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
+    spawnAxisTroops(love.mouse.getX()+player.screenx, love.mouse.getY()+player.screeny, "")
+    player.textCue[#player.textCue+1] = {}
+    player.textCue[#player.textCue].name = "DEV: Spawned Axis Troop"
+    player.textCue[#player.textCue].x = player.screenx + 600
+    player.textCue[#player.textCue].y = 300
+    player.textCue[#player.textCue].alpha = 255
+  else
+    createGrunt(love.mouse.getX()+player.screenx, love.mouse.getY()+player.screeny, "grunt")
+    if(player.deployedTroops[#player.deployedTroops] ~= nil) then
+      player.deployedTroops[#player.deployedTroops].playerControlled = 1
+    end
+    player.textCue[#player.textCue+1] = {}
+    player.textCue[#player.textCue].name = "DEV: Spawned Allied Grunt"
+    player.textCue[#player.textCue].x = player.screenx + 600
+    player.textCue[#player.textCue].y = 300
+    player.textCue[#player.textCue].alpha = 255
+  end
+  local clone_sfx4
+  clone_sfx4 = gageUp:clone()
+  clone_sfx4:play()
+end
+
+if(key == "f7") then
+  if(love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
+    createExplosion("mortarExplosion", love.mouse.getX()+player.screenx, love.mouse.getY()+player.screeny)
+  else
+    revealAllEnemies()
+    player.textCue[#player.textCue+1] = {}
+    player.textCue[#player.textCue].name = "DEV: Enemies Revealed (30s)"
+    player.textCue[#player.textCue].x = player.screenx + 600
+    player.textCue[#player.textCue].y = 300
+    player.textCue[#player.textCue].alpha = 255
+    local clone_sfx4
+    clone_sfx4 = gageUp:clone()
+    clone_sfx4:play()
+  end
+end
+
+if(key == "f8") then
+  if(love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
+    spawnMNB2Wave()
+    player.textCue[#player.textCue+1] = {}
+    player.textCue[#player.textCue].name = "DEV: Wave Spawned"
+    player.textCue[#player.textCue].x = player.screenx + 600
+    player.textCue[#player.textCue].y = 300
+    player.textCue[#player.textCue].alpha = 255
+  else
+    createBandages(love.mouse.getX()+player.screenx, love.mouse.getY()+player.screeny)
+    if(ammoLoot ~= nil and #ammoLoot > 0) then
+      player.lootables[#player.lootables+1] = {}
+      player.lootables[#player.lootables].name = ammoLoot[randNbr(#ammoLoot)]
+      player.lootables[#player.lootables].x = love.mouse.getX()+player.screenx + 25
+      player.lootables[#player.lootables].y = love.mouse.getY()+player.screeny
+      screenSanity(player.lootables[#player.lootables])
+      player.lootables[#player.lootables].flagged = 1
+      player.lootables[#player.lootables].faction = "allied"
+      player.lootables[#player.lootables].argument = 1
+      player.lootables[#player.lootables].size = 10
+      player.lootables[#player.lootables].life = 120
+      player.lootables[#player.lootables].rotation = math.rad(randNbr(360))
+    end
+    player.textCue[#player.textCue+1] = {}
+    player.textCue[#player.textCue].name = "DEV: Spawned Meds & Ammo"
+    player.textCue[#player.textCue].x = player.screenx + 600
+    player.textCue[#player.textCue].y = 300
+    player.textCue[#player.textCue].alpha = 255
+  end
+end
+
+if(1 == 0) then
+'''
+match_indent = true

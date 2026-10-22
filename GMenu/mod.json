@@ -1,0 +1,19 @@
+{
+  "id": "gmenu",
+  "name": "GMenu UI Framework & Options API",
+  "version": "1.0.0",
+  "game_version": ">=0.9.1",
+  "authors": [
+    "Community Mod Team"
+  ],
+  "description": "Standardized non-destructive UI framework and Options API for Mud and Blood. Features dedicated Mod Operations menu for custom game modes and Mod Options panel with auto-discovery.",
+  "category": "UI",
+  "tags": [
+    "Framework",
+    "UI",
+    "Settings",
+    "API"
+  ],
+  "load_priority": 95,
+  "entry_patch": "qm.toml"
+}

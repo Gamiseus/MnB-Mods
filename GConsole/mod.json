@@ -1,0 +1,17 @@
+{
+  "id": "gconsole",
+  "name": "Developer Console & Debug Suite",
+  "version": "1.0.0",
+  "game_version": ">=0.9.1",
+  "authors": [
+    "Community Mod Team"
+  ],
+  "description": "Windows debug console attachment, F1-F8 developer hotkeys, and real-time overlays.",
+  "category": "Dev",
+  "tags": [
+    "Debug",
+    "Console"
+  ],
+  "load_priority": 50,
+  "entry_patch": "qm.toml"
+}

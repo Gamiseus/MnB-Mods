@@ -1,0 +1,43 @@
+[manifest]
+version = "1.0.0"
+priority = 60
+
+# 1. Provide the GDumper module
+[[patches]]
+[patches.module]
+source = "gdumper.lua"
+before = "main.lua"
+name = "includes/gdumper"
+
+# 2. Require GDumper in main.lua
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+gdumper = require "includes/gdumper"
+'''
+match_indent = true
+
+# 3. Initialize in love.load
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "function love.load()"
+position = "after"
+payload = '''
+  if gdumper then gdumper.init() end
+'''
+match_indent = true
+
+# 4. Hotkeys: Ctrl+Shift+D (Lua) / Ctrl+Shift+Alt+D (full archive)
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "function love.keypressed(key)"
+position = "after"
+payload = '''
+  if gdumper and gdumper.onKeyPressed(key) then return end
+'''
+match_indent = true

@@ -1,0 +1,117 @@
+[manifest]
+version = "1.0.0"
+priority = 95
+
+# 1. Register modules
+[[patches]]
+[patches.module]
+source = "gmenu_core.lua"
+before = "main.lua"
+name = "includes/gmenu_core"
+
+[[patches]]
+[patches.module]
+source = "gmenu_ui.lua"
+before = "main.lua"
+name = "includes/gmenu_ui"
+
+# 2. Main.lua: Require GMenu modules
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+GMenu = require "includes/gmenu_core"
+require "includes/gmenu_ui"
+'''
+match_indent = true
+
+# 3. Main.lua: Initialize GMenu in love.load
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "function love.load()"
+position = "after"
+payload = '''
+  if GMenu and GMenu.init then GMenu.init() end
+'''
+match_indent = true
+
+# 4. urb_engine.lua: Register Main Menu MOD OPERATIONS button on menuPage == 1
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+    else
+      buttons[#buttons+1] = Button.new(32, 686, 60, 30, "pause_yes","active", true, "Quit the game")
+    end
+'''
+position = "after"
+payload = '''
+    if GMenu and GMenu.registerMainMenuButton then GMenu.registerMainMenuButton() end
+'''
+match_indent = true
+
+# 5. urb_engine.lua: Register buttons for Screen 85 (Mod Operations), 86 (Mod Options), and Dynamic Custom Mod Screens
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+  elseif(menuPage == 10) then 
+    buttons[#buttons+1] = Button.new(32, 686, 60, 30, "menu_back","active", true, mouseOverBack)
+'''
+position = "after"
+payload = '''
+  elseif(menuPage == 85) then 
+    if GMenu and GMenu.registerModModesButtons then GMenu.registerModModesButtons() end
+  elseif(menuPage == 86) then 
+    if GMenu and GMenu.registerModOptionsButtons then GMenu.registerModOptionsButtons() end
+  elseif GMenu and GMenu.customPages and GMenu.customPages[menuPage] then
+    if GMenu.customPages[menuPage].registerButtons then GMenu.customPages[menuPage].registerButtons() end
+'''
+match_indent = true
+
+# 6. drawFiles.lua: Render Main Menu MOD OPERATIONS trigger on menuPage == 1
+[[patches]]
+[patches.pattern]
+target = "includes/drawFiles.lua"
+pattern = '''
+    else
+      love.graphics.printf({{love.math.colorFromBytes(211,211,211,uiFade)}, "Quit"}, 50, 685, 280, "left")
+    end
+'''
+position = "after"
+payload = '''
+    if GMenu and GMenu.drawMainMenuButton then GMenu.drawMainMenuButton() end
+'''
+match_indent = true
+
+# 7. drawFiles.lua: Render Screen 85 (Mod Operations Hub) and Screen 86 (Mod Options Panel)
+[[patches]]
+[patches.pattern]
+target = "includes/drawFiles.lua"
+pattern = '''
+    if(player.borderLess == 1) then
+      love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
+      love.graphics.rectangle( "fill", 1026, 276, 18, 18 )
+    end
+    --
+  end
+'''
+position = "at"
+payload = '''
+    if(player.borderLess == 1) then
+      love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
+      love.graphics.rectangle( "fill", 1026, 276, 18, 18 )
+    end
+    --
+  elseif(menuPage == 85) then
+    if GMenu and GMenu.drawModModes then GMenu.drawModModes() end
+  elseif(menuPage == 86) then
+    if GMenu and GMenu.drawModOptions then GMenu.drawModOptions() end
+  elseif GMenu and GMenu.customPages and GMenu.customPages[menuPage] then
+    if GMenu.customPages[menuPage].draw then GMenu.customPages[menuPage].draw() end
+  end
+'''
+match_indent = true

@@ -1,0 +1,1228 @@
+[manifest]
+version = "1.0.0"
+priority = 20
+
+# 1. Register modules
+[[patches]]
+[patches.module]
+source = "pathfinding.lua"
+before = "main.lua"
+name = "includes/pathfinding"
+
+[[patches]]
+[patches.module]
+source = "smart_move.lua"
+before = "main.lua"
+name = "includes/smart_move"
+
+[[patches]]
+[patches.module]
+source = "pathfinder_thread.lua"
+before = "main.lua"
+name = "includes/pathfinder_thread"
+
+# 2. Main.lua: Require modules and initialize mod settings
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+pathfinding = require "includes/pathfinding"
+smart_move = require "includes/smart_move"
+
+modSettings = {
+  squadLimitEnabled = 1,
+  squadLimitThreshold = 6,
+  smartMoveEnabled = 1,
+  pathfindingEnabled = 1
+}
+
+function loadModSettings()
+  if love and love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo("mod_settings.lua") then
+    local ok, loaded = pcall(love.filesystem.load, "mod_settings.lua")
+    if ok and type(loaded) == "function" then
+      local ok2, data = pcall(loaded)
+      if ok2 and type(data) == "table" then
+        if data.squadLimitEnabled ~= nil then modSettings.squadLimitEnabled = data.squadLimitEnabled end
+        if data.squadLimitThreshold ~= nil then modSettings.squadLimitThreshold = data.squadLimitThreshold end
+        if data.smartMoveEnabled ~= nil then modSettings.smartMoveEnabled = data.smartMoveEnabled end
+        if data.pathfindingEnabled ~= nil then modSettings.pathfindingEnabled = data.pathfindingEnabled end
+      end
+    end
+  end
+  if player then
+    player.option_squadLimitEnabled = modSettings.squadLimitEnabled
+    player.option_squadLimitThreshold = modSettings.squadLimitThreshold
+    player.option_smartMoveEnabled = modSettings.smartMoveEnabled
+    player.option_pathfindingEnabled = modSettings.pathfindingEnabled
+  end
+end
+
+function saveModSettings()
+  if love and love.filesystem then
+    local ser = require "includes/ser"
+    love.filesystem.write("mod_settings.lua", ser(modSettings))
+  end
+  if player then
+    player.option_squadLimitEnabled = modSettings.squadLimitEnabled
+    player.option_squadLimitThreshold = modSettings.squadLimitThreshold
+    player.option_smartMoveEnabled = modSettings.smartMoveEnabled
+    player.option_pathfindingEnabled = modSettings.pathfindingEnabled
+  end
+end
+'''
+match_indent = true
+
+# 3. Main.lua: Initialize thread worker in love.load
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "Steam.init()"
+position = "before"
+payload = "  if pathfinding then pathfinding.initThreadWorker() end"
+match_indent = true
+
+# 4. Main.lua: Call loadModSettings in love.load
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "setOptionVolume()"
+position = "before"
+payload = "  loadModSettings()"
+match_indent = true
+
+# 5. Main.lua: Sync options to mnb3Tomnb2
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "mnb3Tomnb2_maxWave = player.maxWave"
+position = "after"
+payload = '''
+  mnb3Tomnb2_squadLimitEnabled = player.option_squadLimitEnabled
+  mnb3Tomnb2_squadLimitThreshold = player.option_squadLimitThreshold
+  mnb3Tomnb2_smartMoveEnabled = player.option_smartMoveEnabled
+  mnb3Tomnb2_pathfindingEnabled = player.option_pathfindingEnabled
+'''
+match_indent = true
+
+# 6. Main.lua: Update pathfinding in love.update
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "runTime0(dt)"
+position = "before"
+payload = "        if pathfinding then pathfinding.update(dt) end"
+match_indent = true
+
+# 7. Main.lua: Smart squad movement on click (head)
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+        --if landed or within boat
+        if(player.landed == 1 or ((x < 867 and x > 600) and (y > 300 and y < 400))) then 
+          if(iconOn == 0) then 
+            for ii=1, #player.deployedTroops, 1 do
+'''
+position = "at"
+payload = '''
+        --if landed or within boat
+        if(player.landed == 1 or ((x < 867 and x > 600) and (y > 300 and y < 400))) then 
+          if(iconOn == 0) then 
+            local smartBatch = {}
+            if(player.landed == 1 and altMove == 0 and (player.option_smartMoveEnabled == nil or player.option_smartMoveEnabled ~= 0) and smart_move ~= nil) then
+              for ii=1, #player.deployedTroops, 1 do
+                if(player.deployedTroops[ii].selected and player.deployedTroops[ii].onFire <= 0) then
+                  smartBatch[#smartBatch+1] = player.deployedTroops[ii]
+                end
+              end
+            end
+            if(#smartBatch > 1) then
+              smart_move.assignSquadMoveOrder(smartBatch, x + player.screenx, y + player.screeny)
+              for ii=1, #player.deployedTroops, 1 do
+                if(player.deployedTroops[ii].selected and player.deployedTroops[ii].onFire <= 0) then
+                  if(player.deployedTroops[ii].mortar > 0) then 
+                    checkCue(player.deployedTroops[ii].x, player.deployedTroops[ii].y, 21)
+                  end
+                  if (enemyCqc(player.deployedTroops[ii]) > 0) then 
+                    opportunityOfActionOnSoldier(player.deployedTroops[ii])
+                  end
+                  group = group + 1
+                  player.deployedTroops[ii].selected = false
+                  if(player.deployedTroops[ii].pinned == 0) then 
+                    player.deployedTroops[ii].state = "idle"
+                  end
+                  player.deployedTroops[ii].stateTimer = 0.3
+                  player.deployedTroops[ii].targetPointer = 0
+                  player.deployedTroops[ii].temporaryStop = 0
+                  sanityCheck(player.deployedTroops[ii])
+                  for pp, bullet in ipairs(player.particles) do
+                    if(bullet.faction == player.deployedTroops[ii].id) then 
+                      table.remove(player.particles, pp)
+                    end
+                  end
+                  newPart = {}
+                  addParticle(newPart, "moveDot", player.deployedTroops[ii].targetx, player.deployedTroops[ii].targety, math.rad(randNbr(360)))
+                  table.insert(player.particles, newPart)
+                  player.particles[#player.particles].faction = player.deployedTroops[ii].id
+                  movin = ii
+                  if(group >= 2) then 
+                    checkCue(player.deployedTroops[ii].x, player.deployedTroops[ii].y, 22)
+                    checkCue(player.deployedTroops[ii].x, player.deployedTroops[ii].y, 36)
+                    checkCue(player.deployedTroops[ii].x, player.deployedTroops[ii].y, 43)
+                    if(player.tension > 28) then 
+                      checkCue(player.deployedTroops[ii].x, player.deployedTroops[ii].y, 68)
+                    end
+                  end
+                end
+              end
+            else
+            for ii=1, #player.deployedTroops, 1 do
+'''
+match_indent = true
+
+# 8. Main.lua: Smart squad movement on click (close block)
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+            end   
+            --check to move vehicles
+'''
+position = "at"
+payload = '''
+            end
+            end   
+            --check to move vehicles
+'''
+match_indent = true
+
+# 9. Main.lua: Halt order (H key) reset
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+        player.deployedTroops[i].targetx = player.deployedTroops[i].x
+        player.deployedTroops[i].targety = player.deployedTroops[i].y
+        if(spamTimer <= 0) then 
+'''
+position = "at"
+payload = '''
+        player.deployedTroops[i].targetx = player.deployedTroops[i].x
+        player.deployedTroops[i].targety = player.deployedTroops[i].y
+        player.deployedTroops[i]._pfGoalX = nil
+        player.deployedTroops[i]._savedOrderX = nil
+        player.deployedTroops[i]._savedOrderY = nil
+        player.deployedTroops[i]._inCombatReaction = nil
+        player.deployedTroops[i]._combatThreatClearTimer = nil
+        player.deployedTroops[i]._sprintingToCover = nil
+        player.deployedTroops[i]._combatRetaliating = nil
+        player.deployedTroops[i]._retaliationDone = nil
+        player.deployedTroops[i].combatHaltTimer = 0
+        if(spamTimer <= 0) then 
+'''
+match_indent = true
+
+# 10. Main.lua: Shift+F9 dedicated toggle for Pathfinding NavGrid
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+  if(key == "f9") then
+    if(showTerrain == 0) then 
+'''
+position = "at"
+payload = '''
+  if(key == "f9") then
+    local shiftDownF = love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")
+    if shiftDownF then
+      if pathfinding then
+        pathfinding.debugOverlay = not pathfinding.debugOverlay
+        local isOn = pathfinding.debugOverlay
+        player.textCue[#player.textCue+1] = {}
+        player.textCue[#player.textCue].name = isOn and "Pathfinding NavGrid ON" or "Pathfinding NavGrid OFF"
+        player.textCue[#player.textCue].x = player.screenx + 600
+        player.textCue[#player.textCue].y = 300
+        player.textCue[#player.textCue].alpha = 255
+        local sfx = isOn and gageUp or gageDown
+        if sfx then local cl = sfx:clone(); cl:play() end
+      end
+    else
+    if(showTerrain == 0) then 
+'''
+match_indent = true
+
+# 11. Main.lua: Close F9 shift guard
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+      showTerrain = 0
+      showLOS = 0
+      local clone_sfx4 
+      clone_sfx4 = gageDown:clone()
+      clone_sfx4:play()
+    end 
+  end
+'''
+position = "at"
+payload = '''
+      showTerrain = 0
+      showLOS = 0
+      local clone_sfx4 
+      clone_sfx4 = gageDown:clone()
+      clone_sfx4:play()
+    end 
+    end
+  end
+'''
+match_indent = true
+
+# 12. AI.lua: Prepend combat reaction engine
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = "function infantryUpdate(dt)"
+position = "before"
+payload = '''
+local COMBAT_CALLOUTS = {
+  "Taking fire! Finding cover!",
+  "Ambush! Hit the dirt!",
+  "Enemy contact! Take cover!",
+  "Under heavy fire! Moving to cover!"
+}
+
+local CONTACT_CALLOUTS = {
+  "Hostiles spotted! Get down!",
+  "Germans sighted! Take cover!",
+  "Enemy contact front!",
+  "Movement ahead! Watch your fire!"
+}
+
+local SECURE_CALLOUTS = {
+  "Threat eliminated! Moving out!",
+  "All clear! Resuming move!",
+  "Area secure! Moving out!",
+  "Hostiles down! Keep moving!"
+}
+
+local function findCoverWithinRadius(dude, maxRadius, threat)
+  if not player then return nil, nil, false end
+  maxRadius = maxRadius or 160
+  local bestScore = 99999
+  local bestX, bestY = nil, nil
+
+  local px, py = dude.x, dude.y
+  local curThreatDist = threat and distanceCheck(px, py, threat.x, threat.y) or 99999
+
+  -- 1. Check if current movement order destination is ALREADY in/near cover
+  if dude.targetx and dude.targety then
+    local distToOrder = distanceCheck(px, py, dude.targetx, dude.targety)
+    if distToOrder <= 90 then
+      local destCover = false
+      if player.groundType then
+        for u = 1, #player.groundType do
+          local gt = player.groundType[u]
+          if gt and (gt.cover or 0) > 0 and (gt.width or 0) > 0 and (gt.length or 0) > 0 then
+            if dude.targetx >= gt.x and dude.targetx <= gt.x + gt.width and
+               dude.targety >= gt.y and dude.targety <= gt.y + gt.length then
+              destCover = true
+              break
+            end
+          end
+        end
+      end
+      if not destCover and player.forest then
+        for u = 1, #player.forest do
+          local f = player.forest[u]
+          if f and distanceCheck(dude.targetx, dude.targety, f.x, f.y) <= (f.radius or 30) then
+            destCover = true
+            break
+          end
+        end
+      end
+      if destCover then
+        return dude.targetx, dude.targety, true
+      end
+    end
+  end
+
+  -- 2. Evaluate groundType rectangles (trenches, sandbags, craters, walls, ditches)
+  if player.groundType then
+    for u = 1, #player.groundType do
+      local gt = player.groundType[u]
+      if gt and (gt.cover or 0) > 0 and (gt.width or 0) > 0 and (gt.length or 0) > 0 then
+        local minX = gt.x
+        local maxX = gt.x + gt.width
+        local minY = gt.y
+        local maxY = gt.y + gt.length
+
+        -- Clamp dude position to get true nearest point on rectangle
+        local nearX = math.max(minX, math.min(px, maxX))
+        local nearY = math.max(minY, math.min(py, maxY))
+        local d = distanceCheck(px, py, nearX, nearY)
+
+        if d <= maxRadius then
+          local candX = math.max(minX + 8, math.min(nearX, maxX - 8))
+          local candY = math.max(minY + 8, math.min(nearY, maxY - 8))
+
+          local compromised = false
+          if player.deployedTroops then
+            for o = 1, #player.deployedTroops do
+              local tro = player.deployedTroops[o]
+              if tro and tro.faction == "axis" and (tro.health or 0) > 10 and distanceCheck(candX, candY, tro.x, tro.y) < 140 then
+                compromised = true
+                break
+              end
+            end
+          end
+
+          local crowd = 0
+          if not compromised and player.deployedTroops then
+            for o = 1, #player.deployedTroops do
+              local tro = player.deployedTroops[o]
+              if tro and tro.faction == dude.faction and tro.id ~= dude.id and distanceCheck(candX, candY, tro.x, tro.y) < 50 then
+                crowd = crowd + 1
+              end
+            end
+          end
+
+          if not compromised and crowd <= 2 and not fireNearby(candX, candY) then
+            local score = d
+
+            if threat and threat.x and threat.y then
+              local candThreatDist = distanceCheck(candX, candY, threat.x, threat.y)
+              if candThreatDist < curThreatDist - 30 then
+                score = score + 160
+              elseif candThreatDist >= curThreatDist then
+                score = score - 25
+              end
+
+              local canShoot = los2({x = candX, y = candY}, threat)
+              if canShoot then
+                score = score - 60
+              else
+                score = score + 45
+              end
+            end
+
+            score = score - (gt.cover or 0) * 0.4
+
+            if score < bestScore then
+              bestScore = score
+              bestX = candX
+              bestY = candY
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- 3. Evaluate trees (forest)
+  if player.forest then
+    for u = 1, #player.forest do
+      local f = player.forest[u]
+      if f then
+        local d = distanceCheck(px, py, f.x, f.y)
+        if d <= maxRadius and d > 20 then
+          local candX = f.x
+          local candY = f.y
+
+          local compromised = false
+          if player.deployedTroops then
+            for o = 1, #player.deployedTroops do
+              local tro = player.deployedTroops[o]
+              if tro and tro.faction == "axis" and (tro.health or 0) > 10 and distanceCheck(candX, candY, tro.x, tro.y) < 140 then
+                compromised = true
+                break
+              end
+            end
+          end
+
+          if not compromised and not fireNearby(candX, candY) then
+            local score = d + 20
+
+            if threat and threat.x and threat.y then
+              local candThreatDist = distanceCheck(candX, candY, threat.x, threat.y)
+              if candThreatDist < curThreatDist - 30 then
+                score = score + 160
+              end
+              local canShoot = los2({x = candX, y = candY}, threat)
+              if canShoot then
+                score = score - 40
+              else
+                score = score + 30
+              end
+            end
+
+            if score < bestScore then
+              bestScore = score
+              bestX = candX
+              bestY = candY
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return bestX, bestY, false
+end
+
+local function getThreatInfo(dude)
+  local nearestVisibleEnemy = nil
+  local nearestVisibleDist = 99999
+  local visibleThreatCount = 0
+
+  local nearestProximityEnemy = nil
+  local nearestProximityDist = 99999
+  local proximityCount = 0
+
+  local hasDirectThreat = false
+
+  if not player then return nil, 99999, 0, nil, 99999, 0, false end
+
+  if player.deployedTroops then
+    for o = 1, #player.deployedTroops do
+      local enemy = player.deployedTroops[o]
+      if enemy and enemy.faction == "axis" and (enemy.health or 0) > 10 and (enemy.dead or 0) == 0 then
+        local d = distanceCheck2(dude, enemy)
+        local isStealthed = (hasBuffByTag("stealth", enemy) or hasBuffByTag("camo", enemy)) and (enemy.flagged or 0) <= 0
+        if not isStealthed then
+          if d <= 520 then
+            proximityCount = proximityCount + 1
+            if d < nearestProximityDist then
+              nearestProximityDist = d
+              nearestProximityEnemy = enemy
+            end
+          end
+
+          if d <= 600 then
+            local hasLOS = los2(dude, enemy)
+            if hasLOS then
+              visibleThreatCount = visibleThreatCount + 1
+              if d < nearestVisibleDist then
+                nearestVisibleDist = d
+                nearestVisibleEnemy = enemy
+              end
+              if d <= 420 or (enemy.aim and enemy.aim > 0) or (enemy.target == dude.id) or (enemy.flagged and enemy.flagged > 0) then
+                hasDirectThreat = true
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if player.deployedVehicles then
+    for o = 1, #player.deployedVehicles do
+      local veh = player.deployedVehicles[o]
+      if veh and veh.faction == "axis" and (veh.dead or 0) == 0 and (veh.health or 0) > 10 then
+        local d = distanceCheck2(dude, veh)
+        if d <= 650 then
+          proximityCount = proximityCount + 1
+          if d < nearestProximityDist then
+            nearestProximityDist = d
+            nearestProximityEnemy = veh
+          end
+          local hasLOS = los2(dude, veh)
+          if hasLOS then
+            visibleThreatCount = visibleThreatCount + 1
+            if d < nearestVisibleDist then
+              nearestVisibleDist = d
+              nearestVisibleEnemy = veh
+            end
+            hasDirectThreat = true
+          end
+        end
+      end
+    end
+  end
+
+  return nearestVisibleEnemy, nearestVisibleDist, visibleThreatCount, nearestProximityEnemy, nearestProximityDist, proximityCount, hasDirectThreat
+end
+
+local function checkCombatInterruption(dude, dt)
+  if not dude or dude.faction ~= "allied" or (dude.dead or 0) == 1 or (dude.health or 0) <= 0 then
+    return
+  end
+
+  if (dude._combatHysteresisTimer or 0) > 0 then
+    dude._combatHysteresisTimer = dude._combatHysteresisTimer - dt
+    if dude._combatHysteresisTimer < 0 then dude._combatHysteresisTimer = 0 end
+  end
+
+  if (dude.confused or 0) > 0 or (dude.retreating or 0) > 0 or (dude.pinned or 0) > 0 or (dude.onFire or 0) > 0 then
+    return
+  end
+
+  local isMoving = (dude.targetx and dude.targety and (math.abs(dude.x - dude.targetx) > 12 or math.abs(dude.y - dude.targety) > 12))
+
+  local visEnemy, visDist, visCount, proxEnemy, proxDist, proxCount, hasDirectThreat = getThreatInfo(dude)
+  local primaryThreat = visEnemy or proxEnemy
+
+  local dangerVal = dude.danger or 0
+  local takingFire = (dangerVal >= 30) or hasDirectThreat
+  local enemySighted = (visCount > 0 and visEnemy ~= nil)
+
+  local isVeteran = ((dude.kills or 0) >= 1) or ((dude.xp or 0) >= 15)
+
+  if dude._inCombatReaction then
+    -- Sub-state 1A: Veteran Shoot-First Retaliation Burst
+    if dude._combatRetaliating then
+      dude.temporaryStop = 2.0
+      dude.targetx = dude.x
+      dude.targety = dude.y
+
+      if primaryThreat then
+        dude.targetPointer = primaryThreat.id
+        dude.targetDistance = visDist
+        dude.aim = 1
+        if primaryThreat.y and primaryThreat.x then
+          dude.rotation = math.atan2(dude.y - primaryThreat.y, dude.x - primaryThreat.x) + 1.5707
+        end
+      end
+
+      dude._retaliationTimer = (dude._retaliationTimer or 2.0) - dt
+      if dude._retaliationTimer <= 0 then
+        dude._combatRetaliating = nil
+        dude._retaliationDone = true
+
+        local threatDead = not primaryThreat or (primaryThreat.dead and primaryThreat.dead == 1) or (primaryThreat.health and primaryThreat.health <= 0)
+        if threatDead and proxCount == 0 then
+          dude._inCombatReaction = nil
+          dude._combatThreatClearTimer = nil
+          dude._sprintingToCover = nil
+          dude.temporaryStop = 0
+          dude._combatHysteresisTimer = 4.0
+
+          if SECURE_CALLOUTS and #SECURE_CALLOUTS > 0 then
+            floatyText(dude, SECURE_CALLOUTS[randNbr(#SECURE_CALLOUTS)])
+          end
+
+          if dude._savedOrderX and dude._savedOrderY then
+            dude.targetx = dude._savedOrderX
+            dude.targety = dude._savedOrderY
+            dude._savedOrderX = nil
+            dude._savedOrderY = nil
+            if pathfinding and pathfinding.requestPathAsync then
+              pathfinding.requestPathAsync(dude, dude.x, dude.y, dude.targetx, dude.targety)
+            end
+          end
+          return
+        end
+
+        local inCoverNow = (underCover and underCover(dude)) or ((dude.cover or 0) > 0)
+        if not inCoverNow then
+          local cx, cy, isDest = findCoverWithinRadius(dude, 160, primaryThreat)
+          local standAndFight = false
+          if not cx or not cy then
+            standAndFight = true
+          else
+            if randNbr(100) < 50 then standAndFight = true end
+          end
+
+          if standAndFight then
+            dude._sprintingToCover = nil
+            dude.temporaryStop = 2.0
+            dude.targetx = dude.x
+            dude.targety = dude.y
+            dude.pathQueue = nil
+            dude.stance = 2
+            floatyText(dude, "Hold the line! Engaging!")
+          else
+            dude._sprintingToCover = true
+            dude.temporaryStop = 0
+            dude.targetx = cx
+            dude.targety = cy
+            dude.stance = 1
+            if pathfinding and pathfinding.requestPathAsync then
+              pathfinding.requestPathAsync(dude, dude.x, dude.y, cx, cy)
+            end
+            floatyText(dude, "Moving to better cover!")
+          end
+        end
+      end
+      return
+    end
+
+    -- Sub-state 1B: Sprinting into cover
+    if dude._sprintingToCover then
+      local distToCover = (dude.targetx and dude.targety) and distanceCheck(dude.x, dude.y, dude.targetx, dude.targety) or 9999
+      local inCoverNow = (underCover and underCover(dude)) or ((dude.cover or 0) > 0)
+      if distToCover < 24 or inCoverNow then
+        dude._sprintingToCover = nil
+        dude.temporaryStop = 2.0
+        dude.pathQueue = nil
+        if visEnemy then
+          dude.targetPointer = visEnemy.id
+          dude.targetDistance = visDist
+          dude.aim = 1
+          if visEnemy.y and visEnemy.x then
+            dude.rotation = math.atan2(dude.y - visEnemy.y, dude.x - visEnemy.x) + 1.5707
+          end
+        elseif proxEnemy and proxEnemy.y and proxEnemy.x then
+          dude.rotation = math.atan2(dude.y - proxEnemy.y, dude.x - proxEnemy.x) + 1.5707
+        end
+      end
+      return
+    end
+
+    -- Sub-state 1C: Halted in combat reaction (in cover or prone/halted)
+    dude.temporaryStop = 2.0
+
+    if visEnemy then
+      dude.targetPointer = visEnemy.id
+      dude.targetDistance = visDist
+      dude.aim = 1
+      if visEnemy.y and visEnemy.x then
+        dude.rotation = math.atan2(dude.y - visEnemy.y, dude.x - visEnemy.x) + 1.5707
+      end
+    elseif proxEnemy and proxEnemy.y and proxEnemy.x then
+      dude.rotation = math.atan2(dude.y - proxEnemy.y, dude.x - proxEnemy.x) + 1.5707
+    end
+
+    -- Threat Clearance Logic
+    if proxCount > 0 or takingFire or dangerVal >= 20 then
+      dude._combatThreatClearTimer = nil
+    else
+      if not dude._combatThreatClearTimer then
+        dude._combatThreatClearTimer = 4.0
+      else
+        dude._combatThreatClearTimer = dude._combatThreatClearTimer - dt
+        if dude._combatThreatClearTimer <= 0 then
+          dude._inCombatReaction = nil
+          dude._combatThreatClearTimer = nil
+          dude._sprintingToCover = nil
+          dude._combatRetaliating = nil
+          dude._retaliationDone = nil
+          dude.temporaryStop = 0
+          dude._combatHysteresisTimer = 4.0
+
+          if SECURE_CALLOUTS and #SECURE_CALLOUTS > 0 then
+            floatyText(dude, SECURE_CALLOUTS[randNbr(#SECURE_CALLOUTS)])
+          end
+
+          if dude._savedOrderX and dude._savedOrderY then
+            dude.targetx = dude._savedOrderX
+            dude.targety = dude._savedOrderY
+            dude._savedOrderX = nil
+            dude._savedOrderY = nil
+            if pathfinding and pathfinding.requestPathAsync then
+              pathfinding.requestPathAsync(dude, dude.x, dude.y, dude.targetx, dude.targety)
+            end
+          end
+          return
+        end
+      end
+    end
+    return
+  end
+
+  -- =========================================================================
+  -- STATE 2: Not in Combat Reaction — Check for Interruption
+  -- =========================================================================
+  if isMoving and (takingFire or enemySighted) then
+    if (dude._combatHysteresisTimer or 0) > 0 and not takingFire then
+      return
+    end
+
+    dude._savedOrderX = dude._savedOrderX or dude.targetx
+    dude._savedOrderY = dude._savedOrderY or dude.targety
+    dude._inCombatReaction = true
+    dude._combatThreatClearTimer = nil
+
+    local inCoverNow = (underCover and underCover(dude)) or ((dude.cover or 0) > 0)
+
+    -- === VETERANCY CHECK: Shoot first before seeking cover! ===
+    if isVeteran and not dude._retaliationDone and primaryThreat then
+      dude._combatRetaliating = true
+      dude._retaliationTimer = 1.6 + randNbr(8) / 10
+      dude._retaliationTargetId = primaryThreat.id
+      dude.temporaryStop = 2.0
+      dude.targetx = dude.x
+      dude.targety = dude.y
+      dude.pathQueue = nil
+      dude._pfGoalX = nil
+      dude._pfGoalY = nil
+
+      if not inCoverNow then
+        dude.stance = takingFire and 2 or 1
+      end
+
+      dude.targetPointer = primaryThreat.id
+      dude.targetDistance = visDist
+      dude.aim = 1
+      if primaryThreat.y and primaryThreat.x then
+        dude.rotation = math.atan2(dude.y - primaryThreat.y, dude.x - primaryThreat.x) + 1.5707
+      end
+
+      local retCallouts = {
+        "Returning fire! Cover me!",
+        "Enemy sighted! Opening fire!",
+        "Engaging hostiles!",
+        "Contact front! Firing!"
+      }
+      floatyText(dude, retCallouts[randNbr(#retCallouts)])
+      return
+    end
+
+    -- === NON-VETERAN or Already Retaliated: Tactical Decision ===
+    local cx, cy, isDestCover = nil, nil, false
+    if not inCoverNow then
+      cx, cy, isDestCover = findCoverWithinRadius(dude, 160, primaryThreat)
+    end
+
+    local standAndFight = false
+    if not cx or not cy then
+      standAndFight = true
+    else
+      if isDestCover then
+        standAndFight = false
+      else
+        local role = dude.spec or ""
+        local isGunner = (role == "gunner") or (dude.bipod and dude.bipod == 1)
+        local isSniper = (role == "sniper")
+
+        if isGunner or isSniper then
+          if randNbr(100) < 70 then standAndFight = true end
+        elseif visDist and visDist < 180 then
+          if randNbr(100) < 60 then standAndFight = true end
+        else
+          if randNbr(100) < 35 then standAndFight = true end
+        end
+      end
+    end
+
+    if not standAndFight and cx and cy then
+      dude._sprintingToCover = true
+      dude.temporaryStop = 0
+      dude.targetx = cx
+      dude.targety = cy
+      dude.stance = 1
+      if pathfinding and pathfinding.requestPathAsync then
+        pathfinding.requestPathAsync(dude, dude.x, dude.y, cx, cy)
+      end
+      floatyText(dude, COMBAT_CALLOUTS[randNbr(#COMBAT_CALLOUTS)])
+    else
+      dude._sprintingToCover = nil
+      dude.temporaryStop = 2.0
+      dude.targetx = dude.x
+      dude.targety = dude.y
+      dude.pathQueue = nil
+      dude._pfGoalX = nil
+      dude._pfGoalY = nil
+
+      if not inCoverNow then
+        dude.stance = 2
+      end
+
+      if primaryThreat then
+        dude.targetPointer = primaryThreat.id
+        dude.targetDistance = visDist
+        dude.aim = 1
+        if primaryThreat.y and primaryThreat.x then
+          dude.rotation = math.atan2(dude.y - primaryThreat.y, dude.x - primaryThreat.x) + 1.5707
+        end
+      end
+
+      if takingFire then
+        floatyText(dude, "Taking fire! Return fire!")
+      else
+        floatyText(dude, CONTACT_CALLOUTS[randNbr(#CONTACT_CALLOUTS)])
+      end
+    end
+
+    if spamTimer <= 0 then
+      spamTimer = 2
+      local sfx = _G["lineStop" .. randNbr(14)]
+      if sfx then
+        local clone = sfx:clone()
+        clone:setVolume(stepScale(dude) / 2.0)
+        clone:play()
+      end
+    end
+  end
+end
+'''
+match_indent = true
+
+# 13. AI.lua: Infantry update call combat check & tick stop timer
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = "player.deployedTroops[i].breathTimer = player.deployedTroops[i].breathTimer + dt"
+position = "after"
+payload = '''
+      -- Tick temporaryStop timer
+      if (player.deployedTroops[i].temporaryStop or 0) > 0 then
+        player.deployedTroops[i].temporaryStop = player.deployedTroops[i].temporaryStop - dt
+        if player.deployedTroops[i].temporaryStop < 0 then
+          player.deployedTroops[i].temporaryStop = 0
+        end
+      end
+
+      -- Section 1.4: Tactical combat interruption & under-fire reaction
+      if checkCombatInterruption and player.deployedTroops[i].onFire == 0 then
+        checkCombatInterruption(player.deployedTroops[i], dt)
+      end
+'''
+match_indent = true
+
+# 14. AI.lua: Infantry steering and non-freezing combat movement
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = '''
+          if(randNbr(100)<30) then
+           -- -- print("creajusting angle for "..player.deployedTroops[i].name)
+            if(player.deployedTroops[i].targety) then 
+              player.deployedTroops[i].rotation = math.atan2(player.deployedTroops[i].y -(player.deployedTroops[i].targety), player.deployedTroops[i].x-(player.deployedTroops[i].targetx)) + 1.5707
+            else
+              floatyText(player.deployedTroops[i], "debug:Invalid targety detected on this soldier. \n (reassigning)")
+              player.deployedTroops[i].targetx = player.deployedTroops[i].x
+              player.deployedTroops[i].targety = player.deployedTroops[i].y
+            end
+          end
+          player.deployedTroops[i].x = player.deployedTroops[i].x - math.sin(player.deployedTroops[i].rotation) * currentSpeed * dt
+          player.deployedTroops[i].y = player.deployedTroops[i].y + math.cos(player.deployedTroops[i].rotation) * currentSpeed * dt
+'''
+position = "at"
+payload = '''
+          local combatHalted = player.deployedTroops[i]._inCombatReaction and not player.deployedTroops[i]._sprintingToCover
+
+          local steerX = player.deployedTroops[i].targetx
+          local steerY = player.deployedTroops[i].targety
+          local snapTurn = false
+          if(not combatHalted and pathfinding ~= nil and player.deployedTroops[i].onFire == 0 and (player.landed == nil or player.landed == 1)) then
+            steerX, steerY, snapTurn = pathfinding.getSteeringTarget(player.deployedTroops[i], dt)
+          end
+          if(snapTurn or randNbr(100)<30) then
+           -- -- print("creajusting angle for "..player.deployedTroops[i].name)
+            if(player.deployedTroops[i].targety and steerY and steerX) then 
+              player.deployedTroops[i].rotation = math.atan2(player.deployedTroops[i].y -(steerY), player.deployedTroops[i].x-(steerX)) + 1.5707
+            else
+              floatyText(player.deployedTroops[i], "debug:Invalid targety detected on this soldier. \n (reassigning)")
+              player.deployedTroops[i].targetx = player.deployedTroops[i].x
+              player.deployedTroops[i].targety = player.deployedTroops[i].y
+            end
+          end
+          local prevX = player.deployedTroops[i].x
+          local prevY = player.deployedTroops[i].y
+          if not combatHalted then
+            local distToGoal = math.sqrt((player.deployedTroops[i].x - player.deployedTroops[i].targetx)^2 + (player.deployedTroops[i].y - player.deployedTroops[i].targety)^2)
+            local step = currentSpeed * dt
+            if (steerX == player.deployedTroops[i].targetx and steerY == player.deployedTroops[i].targety and distToGoal <= (step + 2.5)) then
+              player.deployedTroops[i].x = player.deployedTroops[i].targetx
+              player.deployedTroops[i].y = player.deployedTroops[i].targety
+            else
+              player.deployedTroops[i].x = player.deployedTroops[i].x - math.sin(player.deployedTroops[i].rotation) * step
+              player.deployedTroops[i].y = player.deployedTroops[i].y + math.cos(player.deployedTroops[i].rotation) * step
+            end
+          end
+          if(pathfinding ~= nil and player.deployedTroops[i].onFire == 0 and (player.landed == nil or player.landed == 1)) then
+            pathfinding.resolveObstacleCollision(player.deployedTroops[i], prevX, prevY)
+          end
+'''
+match_indent = true
+
+# 15. AI.lua: Vehicle steering target
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = "player.deployedVehicles[i].intendedRotation = math.atan2(player.deployedVehicles[i].y -(player.deployedVehicles[i].targety), player.deployedVehicles[i].x-(player.deployedVehicles[i].targetx)) + 1.5707"
+position = "at"
+payload = '''
+          local vSteerX = player.deployedVehicles[i].targetx
+          local vSteerY = player.deployedVehicles[i].targety
+          if(pathfinding ~= nil and player.deployedVehicles[i].sideRoller <= 0) then
+            vSteerX, vSteerY = pathfinding.getSteeringTarget(player.deployedVehicles[i], dt)
+          end
+          player.deployedVehicles[i].intendedRotation = math.atan2(player.deployedVehicles[i].y -(vSteerY), player.deployedVehicles[i].x-(vSteerX)) + 1.5707
+'''
+match_indent = true
+
+# 16. urb_engine.lua: Inject getEffectiveSquadLimit
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "function squadSizer()"
+position = "before"
+payload = '''
+function getEffectiveSquadLimit()
+  local enabled = (modSettings and modSettings.squadLimitEnabled)
+  if enabled == nil and player then enabled = player.option_squadLimitEnabled end
+  if enabled == 0 then
+    return math.huge
+  end
+  local th = (modSettings and modSettings.squadLimitThreshold)
+  if th == nil and player then th = player.option_squadLimitThreshold end
+  return th or 6
+end
+'''
+match_indent = true
+
+# 17. urb_engine.lua: Guard squad counter-assault trigger
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+      if(player.mnb2SubGame ~= 8) then 
+        if(squadSizer() > 6) then 
+          if(funkMasterFlexTimer <= 0) then 
+           -- print("squad above 6!!")
+            local funkMasterFlex = squadSizer() 
+            if(funkMasterFlex > 12) then 
+'''
+position = "at"
+payload = '''
+      if(player.mnb2SubGame ~= 8) then 
+        local effLimit = getEffectiveSquadLimit()
+        if(effLimit ~= math.huge and squadSizer() > effLimit) then 
+          if(funkMasterFlexTimer <= 0) then 
+           -- print("squad above limit!!")
+            local funkMasterFlex = squadSizer() 
+            if(funkMasterFlex > effLimit * 2) then 
+'''
+match_indent = true
+
+# 19. urb_engine.lua: Add click handlers for buttons
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "function op_musicButton()"
+position = "before"
+payload = '''
+function op_squadLimitButton()
+  local presets = {6, 8, 10, 12, 16, 24, 32}
+  local curEnabled = (modSettings and modSettings.squadLimitEnabled) or (player and player.option_squadLimitEnabled) or 1
+  local cur = (modSettings and modSettings.squadLimitThreshold) or (player and player.option_squadLimitThreshold) or 6
+  if curEnabled == 0 then
+    if modSettings then modSettings.squadLimitEnabled = 1; modSettings.squadLimitThreshold = 6 end
+    if player then player.option_squadLimitEnabled = 1; player.option_squadLimitThreshold = 6 end
+  else
+    local nextVal = nil
+    for i = 1, #presets do
+      if presets[i] > cur then
+        nextVal = presets[i]
+        break
+      end
+    end
+    if nextVal then
+      if modSettings then modSettings.squadLimitEnabled = 1; modSettings.squadLimitThreshold = nextVal end
+      if player then player.option_squadLimitEnabled = 1; player.option_squadLimitThreshold = nextVal end
+    else
+      if modSettings then modSettings.squadLimitEnabled = 0 end
+      if player then player.option_squadLimitEnabled = 0 end
+    end
+  end
+  if saveModSettings then saveModSettings() end
+end
+
+function op_smartMoveButton()
+  local cur = (modSettings and modSettings.smartMoveEnabled) or (player and player.option_smartMoveEnabled) or 1
+  local nVal = (cur == 0) and 1 or 0
+  if modSettings then modSettings.smartMoveEnabled = nVal end
+  if player then player.option_smartMoveEnabled = nVal end
+  if saveModSettings then saveModSettings() end
+end
+
+function op_pathfindingButton()
+  local cur = (modSettings and modSettings.pathfindingEnabled) or (player and player.option_pathfindingEnabled) or 1
+  local nVal = (cur == 0) and 1 or 0
+  if modSettings then modSettings.pathfindingEnabled = nVal end
+  if player then player.option_pathfindingEnabled = nVal end
+  if saveModSettings then saveModSettings() end
+end
+'''
+match_indent = true
+
+# 20. urb_engine.lua: Default options in newProfile
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "player.borderLess = 0"
+position = "after"
+payload = '''
+  player.option_squadLimitEnabled = 1
+  player.option_squadLimitThreshold = 6
+  player.option_smartMoveEnabled = 1
+  player.option_pathfindingEnabled = 1
+'''
+match_indent = true
+
+# 21. urb_engine.lua: Default options in updateProfile
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = 'print("patching for 0.5.1")'
+position = "after"
+payload = '''
+  if(player.option_squadLimitEnabled == nil) then
+    player.option_squadLimitEnabled = 1
+    player.option_squadLimitThreshold = 6
+    player.option_smartMoveEnabled = 1
+    player.option_pathfindingEnabled = 1
+  end
+'''
+match_indent = true
+
+# 22. urb_engine.lua: Invalidate hazards on mineDetect
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "checkCue(soldier.x, soldier.y, 33)"
+position = "after"
+payload = '''
+            mine.flagged = 1
+            if pathfinding and pathfinding.invalidateHazards then
+              pathfinding.invalidateHazards()
+            end
+'''
+match_indent = true
+
+# 23. urb_engine.lua: Invalidate hazards on mineDisarm
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+              table.remove(player.mineField, i)
+              if(soldier.faction == "allied") then 
+'''
+position = "at"
+payload = '''
+              table.remove(player.mineField, i)
+              if pathfinding and pathfinding.invalidateHazards then
+                pathfinding.invalidateHazards()
+              end
+              if(soldier.faction == "allied") then 
+'''
+match_indent = true
+
+# 24. urb_engine.lua: Invalidate hazards on mineGrab
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+                applyLoot(soldier, "HEMine")
+                floatyText(mine, mineGrabbedTxt)
+                table.remove(player.mineField, i)
+                local clone_sfx2
+'''
+position = "at"
+payload = '''
+                applyLoot(soldier, "HEMine")
+                floatyText(mine, mineGrabbedTxt)
+                table.remove(player.mineField, i)
+                if pathfinding and pathfinding.invalidateHazards then
+                  pathfinding.invalidateHazards()
+                end
+                local clone_sfx2
+'''
+match_indent = true
+
+# 25. urb_engine.lua: Invalidate hazards on reconReveal
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+  end
+  -- check for hidden loot
+  for ii=1, #player.lootables, 1 do
+'''
+position = "at"
+payload = '''
+  end
+  if cleared == 1 and pathfinding and pathfinding.invalidateHazards then
+    pathfinding.invalidateHazards()
+  end
+  -- check for hidden loot
+  for ii=1, #player.lootables, 1 do
+'''
+match_indent = true
+
+# 26. urb_engine.lua: Sync options on menu_classicButton
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "player.trenchModeRank = trenchRank"
+position = "after"
+payload = '''
+  if loadModSettings then loadModSettings() end
+  if modSettings then
+    player.option_squadLimitEnabled = modSettings.squadLimitEnabled
+    player.option_squadLimitThreshold = modSettings.squadLimitThreshold
+    player.option_smartMoveEnabled = modSettings.smartMoveEnabled
+    player.option_pathfindingEnabled = modSettings.pathfindingEnabled
+  end
+'''
+match_indent = true
+
+# 27. mnb2.lua: Crowd control limit guard
+[[patches]]
+[patches.pattern]
+target = "includes/mnb2.lua"
+pattern = '''
+  -- crowd control
+  if(player.currentWave > 100) then
+    if(randNbr(100) < (realSquadSizer() -12)) then 
+'''
+position = "at"
+payload = '''
+  -- crowd control
+  if(player.currentWave > 100 and (player.option_squadLimitEnabled or 1) ~= 0) then
+    local crowdLimit = (getEffectiveSquadLimit and getEffectiveSquadLimit() or 6) * 2
+    if(randNbr(100) < (realSquadSizer() - crowdLimit)) then 
+'''
+match_indent = true
+
+# 28. mnb2.lua: sizeControl limit check
+[[patches]]
+[patches.pattern]
+target = "includes/mnb2.lua"
+pattern = '''
+function sizeControl()
+    anounceStuff(mnb2SizeControl)
+'''
+position = "at"
+payload = '''
+function sizeControl()
+    local effLimit = (getEffectiveSquadLimit and getEffectiveSquadLimit() or 6)
+    if effLimit == math.huge then
+      return
+    end
+    if squadSizer() <= effLimit then
+      return
+    end
+    local msg = mnb2SizeControl
+    if effLimit ~= 6 then
+      msg = "More than " .. tostring(effLimit) .. " troops have been detected by the Germans!! Use Camnets"
+    end
+    anounceStuff(msg)
+'''
+match_indent = true
+
+# 29. drawFiles.lua: Debug pathfinding draw
+[[patches]]
+[patches.pattern]
+target = "includes/drawFiles.lua"
+pattern = "--cues"
+position = "before"
+payload = '''
+  if pathfinding then
+    pathfinding.drawDebug()
+  end
+'''
+match_indent = true
+
+# 30. AI.lua: Precise movement arrival threshold (tighten from 10px to 2px)
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = "if(distanceCheck(player.deployedTroops[i].x, player.deployedTroops[i].y, player.deployedTroops[i].targetx, player.deployedTroops[i].targety) >= 10 and player.deployedTroops[i].temporaryStop <= 0) then"
+position = "at"
+payload = "if(distanceCheck(player.deployedTroops[i].x, player.deployedTroops[i].y, player.deployedTroops[i].targetx, player.deployedTroops[i].targety) >= 2 and player.deployedTroops[i].temporaryStop <= 0) then"
+match_indent = true

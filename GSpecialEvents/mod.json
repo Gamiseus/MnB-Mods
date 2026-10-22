@@ -1,0 +1,9 @@
+{
+  "id": "g_special_events",
+  "name": "GSpecialEvents",
+  "version": "1.0.0",
+  "description": "Special Events Manager & Overhaul — Selectable Classic Special Events, Modular Event Dispatcher, and Halloween MoonGrave 3-Way Zombie Combat with Infection Reanimation",
+  "author": "Mud and Blood Modding Team",
+  "priority": 80,
+  "dependencies": ["gmenu", "gcore"]
+}

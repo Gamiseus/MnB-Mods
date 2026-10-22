@@ -1,0 +1,22 @@
+{
+  "id": "tactical_overhaul",
+  "name": "Tactical Overhaul",
+  "version": "1.0.0",
+  "game_version": ">=0.9.1",
+  "authors": [
+    "Community Mod Team"
+  ],
+  "description": "Multithreaded A* pathfinding, smart squad movement, formation spacing, cover evaluation, and combat interruption behaviors.",
+  "category": "Gameplay",
+  "tags": [
+    "AI",
+    "Pathfinding",
+    "Tactics",
+    "Squad"
+  ],
+  "load_priority": 20,
+  "entry_patch": "qm.toml",
+  "dependencies": {
+    "gcore": ">=1.0.0"
+  }
+}

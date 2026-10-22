@@ -1,0 +1,18 @@
+{
+  "id": "g_dumper",
+  "name": "GDumper",
+  "version": "1.0.0",
+  "game_version": ">=0.9.1",
+  "authors": [
+    "Mud and Blood Modding Team"
+  ],
+  "description": "On-demand vanilla game file dumper. Extracts the original, unpatched Lua scripts (or the full game archive) via the QuarterMaster injector.",
+  "category": "Tools",
+  "tags": [
+    "Utility",
+    "Tools",
+    "Dumping"
+  ],
+  "load_priority": 60,
+  "entry_patch": "qm.toml"
+}
