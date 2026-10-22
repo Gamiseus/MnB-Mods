@@ -21,7 +21,6 @@
 
 ### GDumper
 - A simple tool to dump the game files into the qm folder in the mods directory. Will dump either all the LUA files, or the entire base game, depending on which keybind you press.
-   - Currently not posted here
 
 ### GMenu
 - A menu system for Mud and Blood mods to hook if a modder wants to create their own menu in the game, or to add configurable options to the mod settings menu.
