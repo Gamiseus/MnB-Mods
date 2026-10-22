@@ -28,11 +28,11 @@
       - Settings: Define all the usual settings things like cycle buttons (with support for cycling left *and* right), checkboxes, etc. Can use `showif` to only show a setting under certain conditions, ie if another mod is loaded or if one setting is set to something specific.
       - Menus: An automatic menu/page setup system. GMenu automatically assigns page numbers by the pages defined in the mod's config.lua, cards loaded automatically from menuButtons items and pages made from pages items. Currently can handle up to 5 cards before they end up off screen, I have to implement a multi-page/'more cards' system for more than that.
 
-### GSpecialEvents
+### GSpecialEvents - Depends on GMenu and GCore
 - A mod that adds a special event selector to the game, allowing a player to choose which event is loaded, or leave it at auto by calendar date, and use the mod for it's event adjustments.
    - Currently includes modifications for the Halloween event, adding configuration for setting zombie health, speed, and other stats. Also includes patches for spawning and the ai, to encourage the Germans and Zombies to fight each other as well as your own soldiers.
 
-### TacticalOverhaul
+### TacticalOverhaul - Depends on GCore
 - A WIP overhaul mod that introduces a bunch of features aimed at making behavior more realistic. Kind of subjective.
    - Soldiers moved in a group no longer scatter randomly. They seek cover, maintain a little distance, look for spots with good line of sight, try to stay out of each others way and not stand in front of each other.
    - More advanced automatic placement included based on soldier's gear and type.
