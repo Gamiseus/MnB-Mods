@@ -49,3 +49,8 @@
 
 ## Contents
 - All of my mods follow a set schema for `mods.json`. This will be important when the mod launcher is finished, as it will define a bunch of the stuff that the launcher will need to read for organization.
+
+## Install
+- Download the mods in this source
+- Extract the mod folders for what kids you wish to run into the Mods folder inside your Mud and Blood directory. it should look like `Mods/<Modfoldr>/qm.toml`
+- Run the game, it will automatically load all mods within the directory.
