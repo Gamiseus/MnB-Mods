@@ -494,6 +494,62 @@ function pathfinding.rebuildGrid()
   end
 end
 
+
+-- ----------------------------------------------------------------------------
+-- Sanitize & Nudge Destination Away from Hazards & Impassable Obstacles
+-- ----------------------------------------------------------------------------
+function pathfinding.findSafeDestination(wx, wy, unit)
+  if not wx or not wy then return wx, wy end
+  pathfinding.ensureSynced(false)
+
+  local maxX = (player and player.endLine) and (player.endLine + 200) or 2000
+  local maxY = (player and player.mapHeight) or 720
+
+  local function isPointSafe(x, y)
+    -- 1. Map bounds
+    if x < 16 or x > maxX or y < 18 or y > (maxY - 18) then
+      return false
+    end
+
+    -- 2. Active fire avoidance
+    if player and player.fire then
+      for i = 1, #player.fire do
+        local f = player.fire[i]
+        if f and f.x and f.y and (f.burnTime == nil or f.burnTime > 0) then
+          local rad = math.max(36, (f.size or 0.5) * 45 + 24)
+          if (x - f.x)^2 + (y - f.y)^2 < (rad * rad) then
+            return false
+          end
+        end
+      end
+    end
+
+    -- 3. Walkability & hazard threshold (< 5.0 filters out wire=6.5, mines=22+, fires=18+, obstacles=-1)
+    local walkable, cost = pathfinding.isWalkableWorld(x, y, unit)
+    return walkable and cost and cost < 5.0
+  end
+
+  -- If click location is already safe, keep it
+  if isPointSafe(wx, wy) then
+    return wx, wy
+  end
+
+  -- Radial search outward (up to 96px in 16px steps) to find the nearest clear spot
+  for rad = 16, 96, 16 do
+    local steps = math.max(8, math.floor((2 * math.pi * rad) / 16))
+    for i = 0, steps - 1 do
+      local ang = (i / steps) * 2 * math.pi
+      local candX = wx + math.cos(ang) * rad
+      local candY = wy + math.sin(ang) * rad
+      if isPointSafe(candX, candY) then
+        return candX, candY
+      end
+    end
+  end
+
+  return wx, wy
+end
+
 -- ----------------------------------------------------------------------------
 -- Ensure the Nav-Grid is fresh
 -- ----------------------------------------------------------------------------
@@ -669,7 +725,7 @@ local function findNearestWalkableCell(c, r, unit, isVehicle, startBldId, goalBl
   local rows = navGrid.rows
   local idx = (r - 1) * cols + c
   local c0 = getEffectiveCellCost(idx, unit, isVehicle, startBldId, goalBldId, wireCutter)
-  if c0 > 0 and c0 < 15.0 then
+  if c0 > 0 and c0 < 5.0 then
     return c, r
   end
 
@@ -682,7 +738,7 @@ local function findNearestWalkableCell(c, r, unit, isVehicle, startBldId, goalBl
           if nc >= 1 and nc <= cols and nr >= 1 and nr <= rows then
             local nIdx = (nr - 1) * cols + nc
             local nCost = getEffectiveCellCost(nIdx, unit, isVehicle, startBldId, goalBldId, wireCutter)
-            if nCost > 0 and nCost < 15.0 then
+            if nCost > 0 and nCost < 5.0 then
               local d2 = dc * dc + dr * dr
               if d2 < bestDist then
                 bestDist = d2
@@ -707,6 +763,9 @@ end
 function pathfinding.computePath(startX, startY, goalX, goalY, unit)
   pathfinding.ensureSynced(false)
   pathfinding.stats.pathsComputed = pathfinding.stats.pathsComputed + 1
+
+  -- Nudge goal if placed on a hazard/obstacle
+  goalX, goalY = pathfinding.findSafeDestination(goalX, goalY, unit)
 
   local cols = navGrid.cols
   local rows = navGrid.rows
@@ -1287,22 +1346,13 @@ function pathfinding.initThreadWorker()
   if not (love and love.thread and love.thread.newThread) then
     return false
   end
-  local ok, th = false, nil
-  if love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo("includes/pathfinder_thread.lua") then
-    ok, th = pcall(love.thread.newThread, "includes/pathfinder_thread.lua")
-  end
-  if not ok or not th then
-    local code = pathfinding._THREAD_CODE
-    if not code and love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo("Mods/TacticalOverhaul/pathfinder_thread.lua") then
-      code = love.filesystem.read("Mods/TacticalOverhaul/pathfinder_thread.lua")
-    end
-    if code then
-      ok, th = pcall(love.thread.newThread, code)
-    end
-  end
+
+  -- Launch thread worker directly from embedded _THREAD_CODE
+  local ok, th = pcall(love.thread.newThread, pathfinding._THREAD_CODE)
   if not ok or not th then
     return false
   end
+
   reqChannel = love.thread.getChannel("pf_requests")
   resChannel = love.thread.getChannel("pf_results")
   th:start()
@@ -1391,6 +1441,13 @@ end
 function pathfinding.getSteeringTarget(unit, dt)
   if not unit or not unit.targetx or not unit.targety then
     return unit and unit.x or 0, unit and unit.y or 0, false
+  end
+
+  -- Automatically shift destination point if placed on a hazard or unwalkable tile
+  local safeX, safeY = pathfinding.findSafeDestination(unit.targetx, unit.targety, unit)
+  if safeX ~= unit.targetx or safeY ~= unit.targety then
+    unit.targetx = safeX
+    unit.targety = safeY
   end
 
   if player and player.option_pathfindingEnabled == 0 then

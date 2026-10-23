@@ -2,35 +2,46 @@
 version = "1.0.0"
 priority = 100
 
-# Provide safe serializer module
+# =========================================================================
+# MODULE REGISTRATIONS
+# =========================================================================
+
 [[patches]]
 [patches.module]
 source = "ser.lua"
 before = "main.lua"
 name = "includes/ser"
 
-# 2. Provide Box2D physics LOS module
 [[patches]]
 [patches.module]
 source = "los_physics.lua"
 before = "main.lua"
 name = "includes/los_physics"
 
-# 2c. Provide Log Monitor module
 [[patches]]
 [patches.module]
 source = "log_monitor.lua"
 before = "main.lua"
 name = "includes/log_monitor"
 
-# 2e. Provide Decal Baker module
 [[patches]]
 [patches.module]
 source = "decal_baker.lua"
 before = "main.lua"
 name = "includes/decal_baker"
 
-# 3. Enable physics module in conf.lua (required by los_physics)
+[[patches]]
+[patches.module]
+source = "pathfinding.lua"
+before = "main.lua"
+name = "includes/pathfinding"
+
+
+# =========================================================================
+# ENGINE CONFIGURATION (conf.lua)
+# =========================================================================
+
+# Enable physics module
 [[patches]]
 [patches.pattern]
 target = "conf.lua"
@@ -39,7 +50,7 @@ position = "at"
 payload = "t.modules.physics = true           -- Enable the physics module (boolean)"
 match_indent = true
 
-# 4. Enable thread module in conf.lua (required by log_monitor)
+# Enable thread module
 [[patches]]
 [patches.pattern]
 target = "conf.lua"
@@ -48,7 +59,11 @@ position = "at"
 payload = "t.modules.thread = true            -- Enable the thread module (boolean)"
 match_indent = true
 
-# 5. Require los_physics, log_monitor, and decal_baker in main.lua
+# =========================================================================
+# APPLICATION LIFECYCLE & SETTINGS (main.lua)
+# =========================================================================
+
+# Module initialization & modSettings definition
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -58,10 +73,53 @@ payload = '''
 los_physics = require "includes/los_physics"
 log_monitor = require "includes/log_monitor"
 decal_baker = require "includes/decal_baker"
+pathfinding = require "includes/pathfinding"
+
+modSettings = {
+  pathfindingEnabled = 1,
+  safeDestinationEnabled = 1
+}
+
+function loadModSettings()
+  if love and love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo("mod_settings.lua") then
+    local ok, loaded = pcall(love.filesystem.load, "mod_settings.lua")
+    if ok and type(loaded) == "function" then
+      local ok2, data = pcall(loaded)
+      if ok2 and type(data) == "table" then
+        if data.pathfindingEnabled ~= nil then modSettings.pathfindingEnabled = data.pathfindingEnabled end
+        if data.safeDestinationEnabled ~= nil then modSettings.safeDestinationEnabled = data.safeDestinationEnabled end
+      end
+    end
+  end
+  if player then
+    player.option_pathfindingEnabled = modSettings.pathfindingEnabled
+    player.option_safeDestinationEnabled = modSettings.safeDestinationEnabled
+  end
+end
+
+function saveModSettings()
+  if love and love.filesystem then
+    local ser = require "includes/ser"
+    love.filesystem.write("mod_settings.lua", ser(modSettings))
+  end
+  if player then
+    player.option_pathfindingEnabled = modSettings.pathfindingEnabled
+    player.option_safeDestinationEnabled = modSettings.safeDestinationEnabled
+  end
+end
 '''
 match_indent = true
 
-# 6. Initialize modules in love.load
+# Load mod settings before setting volume
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "setOptionVolume()"
+position = "before"
+payload = "  loadModSettings()"
+match_indent = true
+
+# Initialize modules on load
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -71,10 +129,11 @@ payload = '''
   if los_physics then los_physics.init() end
   if log_monitor then log_monitor.init() end
   if decal_baker then decal_baker.init() end
+  if pathfinding then pathfinding.initThreadWorker() end
 '''
 match_indent = true
 
-# 7. Update los_physics frame in love.update
+# Update modules per frame
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -84,59 +143,47 @@ payload = '''
         if los_physics then los_physics.updateFrame() end
         if log_monitor then log_monitor.update(dt) end
         if decal_baker then decal_baker.update(dt) end
+        if pathfinding then pathfinding.update(dt) end
 '''
 match_indent = true
 
-# 10. Wrap los() in urb_engine.lua to use physics raycast
+# Sync options to Classic mode
 [[patches]]
 [patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = "function los(x1, x2, y1, y2)"
+target = "main.lua"
+pattern = "mnb3Tomnb2_maxWave = player.maxWave"
+position = "after"
+payload = '''
+  mnb3Tomnb2_pathfindingEnabled = player.option_pathfindingEnabled
+  mnb3Tomnb2_safeDestinationEnabled = player.option_safeDestinationEnabled
+'''
+match_indent = true
+
+# Clear pathfinding destination on Halt (H key)
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+        player.deployedTroops[i].targetx = player.deployedTroops[i].x
+        player.deployedTroops[i].targety = player.deployedTroops[i].y
+        if(spamTimer <= 0) then 
+'''
 position = "at"
 payload = '''
-function los(x1, x2, y1, y2)
-  if los_physics then
-    return los_physics.checkLOS(x1, x2, y1, y2)
-  end
-  return vanilla_los(x1, x2, y1, y2)
-end
-
-function vanilla_los(x1, x2, y1, y2)
+        player.deployedTroops[i].targetx = player.deployedTroops[i].x
+        player.deployedTroops[i].targety = player.deployedTroops[i].y
+        player.deployedTroops[i]._pfGoalX = nil
+        player.deployedTroops[i]._savedOrderX = nil
+        player.deployedTroops[i]._savedOrderY = nil
+        if(spamTimer <= 0) then 
 '''
 match_indent = true
 
-# 11. Wrap los2() in urb_engine.lua to use physics raycast
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = "function los2(shooter, target)"
-position = "at"
-payload = '''
-function los2(shooter, target)
-  if los_physics then
-    return los_physics.checkLOS2(shooter, target)
-  end
-  return vanilla_los2(shooter, target)
-end
+# =========================================================================
+# KEYBINDS & DEBUG OVERLAYS (main.lua)
+# =========================================================================
 
-function vanilla_los2(shooter, target)
-'''
-match_indent = true
-
-# 15. Draw physics LOS debug overlay in drawFiles.lua
-[[patches]]
-[patches.pattern]
-target = "includes/drawFiles.lua"
-pattern = "--cues"
-position = "before"
-payload = '''
-    if los_physics then
-      los_physics.drawDebugOverlay()
-    end
-'''
-match_indent = true
-
-# 16. Keybind for dedicated F10 LOS overlay toggle
+# F10: Toggle LOS Vision Overlay
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -162,7 +209,7 @@ payload = '''
 '''
 match_indent = true
 
-# 17. Inject Ctrl+F9 Tactical LOS benchmark
+# Ctrl+F9: Run Tactical LOS benchmark
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -182,158 +229,7 @@ payload = '''
 '''
 match_indent = true
 
-
-# 37. drawFiles.lua: High-performance Decal Canvas rendering
-[[patches]]
-[patches.pattern]
-target = "includes/drawFiles.lua"
-pattern = '''
-  for n=1, #player.deco, 1 do
-    love.graphics.draw( _G[player.deco[n].name], player.deco[n].x, player.deco[n].y, player.deco[n].rotation, player.deco[n].size/10, player.deco[n].size/10, _G[player.deco[n].name]:getWidth( )/2, _G[player.deco[n].name]:getHeight( )/2)
-  end
-'''
-position = "at"
-payload = '''
-  if decal_baker then
-    decal_baker.draw()
-  else
-    for n=1, #player.deco, 1 do
-      love.graphics.draw( _G[player.deco[n].name], player.deco[n].x, player.deco[n].y, player.deco[n].rotation, player.deco[n].size/10, player.deco[n].size/10, _G[player.deco[n].name]:getWidth( )/2, _G[player.deco[n].name]:getHeight( )/2)
-    end
-  end
-'''
-match_indent = true
-
-# 40. urb_engine.lua: Notify Decal Baker immediately upon broom cleaning
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-function broomerButton()
-  player.broomTimer = 30
-'''
-position = "at"
-payload = '''
-function broomerButton()
-  player.broomTimer = 30
-  if decal_baker then decal_baker.on_broom_cleaned() end
-'''
-match_indent = true
-
-# 41. urb_engine.lua: Clean excess decals immediately when adjusting MAX DECALS setting
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-function op_decal1Button()
-  player.option_maxDecals = 1
-end
-function op_decal2Button()
-  player.option_maxDecals = 2
-end
-function op_decal3Button()
-  player.option_maxDecals = 3
-end
-function op_decal4Button()
-  player.option_maxDecals = 4
-end
-function op_decal5Button()
-  player.option_maxDecals = 5
-end
-'''
-position = "at"
-payload = '''
-function op_decal1Button()
-  player.option_maxDecals = 1
-  if decal_baker then decal_baker.clean_excess() end
-end
-function op_decal2Button()
-  player.option_maxDecals = 2
-  if decal_baker then decal_baker.clean_excess() end
-end
-function op_decal3Button()
-  player.option_maxDecals = 3
-  if decal_baker then decal_baker.clean_excess() end
-end
-function op_decal4Button()
-  player.option_maxDecals = 4
-  if decal_baker then decal_baker.clean_excess() end
-end
-function op_decal5Button()
-  player.option_maxDecals = 5
-  if decal_baker then decal_baker.clean_excess() end
-end
-'''
-match_indent = true
-
-
-# =========================================================================
-# PATHFINDING & THREAD WORKER MODULES
-# =========================================================================
-
-# 1. Register pathfinding and worker thread modules
-[[patches]]
-[patches.module]
-source = "pathfinding.lua"
-before = "main.lua"
-name = "includes/pathfinding"
-
-[[patches]]
-[patches.module]
-source = "pathfinder_thread.lua"
-before = "main.lua"
-name = "includes/pathfinder_thread"
-
-# 2. Main.lua: Require pathfinding module
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
-pathfinding = require "includes/pathfinding"
-'''
-match_indent = true
-
-# 3. Main.lua: Initialize thread worker in love.load
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = "Steam.init()"
-position = "before"
-payload = "  if pathfinding then pathfinding.initThreadWorker() end"
-match_indent = true
-
-# 4. Main.lua: Update pathfinding async queues in love.update
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = "runTime0(dt)"
-position = "before"
-payload = "        if pathfinding then pathfinding.update(dt) end"
-match_indent = true
-
-# 5. Main.lua: Clear pathfinding destination on Halt order (H key)
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = '''
-        player.deployedTroops[i].targetx = player.deployedTroops[i].x
-        player.deployedTroops[i].targety = player.deployedTroops[i].y
-        if(spamTimer <= 0) then 
-'''
-position = "at"
-payload = '''
-        player.deployedTroops[i].targetx = player.deployedTroops[i].x
-        player.deployedTroops[i].targety = player.deployedTroops[i].y
-        player.deployedTroops[i]._pfGoalX = nil
-        player.deployedTroops[i]._savedOrderX = nil
-        player.deployedTroops[i]._savedOrderY = nil
-        if(spamTimer <= 0) then 
-'''
-match_indent = true
-
-# 6. Main.lua: Shift+F9 dedicated toggle for Pathfinding NavGrid overlay
+# Shift+F9: Toggle NavGrid overlay
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -362,7 +258,7 @@ payload = '''
 '''
 match_indent = true
 
-# 7. Main.lua: Close Shift guard for F9
+# Close Shift guard for F9
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -388,7 +284,11 @@ payload = '''
 '''
 match_indent = true
 
-# 8. AI.lua: Infantry steering and dynamic collision resolution
+# =========================================================================
+# MOVEMENT & STEERING (includes/ai.lua)
+# =========================================================================
+
+# Infantry steering and collision resolution
 [[patches]]
 [patches.pattern]
 target = "includes/ai.lua"
@@ -441,7 +341,7 @@ payload = '''
 '''
 match_indent = true
 
-# 9. AI.lua: Vehicle pathfinding steering target
+# Vehicle steering target
 [[patches]]
 [patches.pattern]
 target = "includes/ai.lua"
@@ -457,7 +357,7 @@ payload = '''
 '''
 match_indent = true
 
-# 10. AI.lua: Precise waypoint arrival threshold (tightens from 10px to 2px for smooth node pathing)
+# Waypoint arrival threshold (tightens from 10px to 2px)
 [[patches]]
 [patches.pattern]
 target = "includes/ai.lua"
@@ -466,7 +366,47 @@ position = "at"
 payload = "if(distanceCheck(player.deployedTroops[i].x, player.deployedTroops[i].y, player.deployedTroops[i].targetx, player.deployedTroops[i].targety) >= 2 and player.deployedTroops[i].temporaryStop <= 0) then"
 match_indent = true
 
-# 11. urb_engine.lua: Invalidate hazards on mineDetect
+# =========================================================================
+# GAME ENGINE & HAZARDS (includes/urb_engine.lua)
+# =========================================================================
+
+# Wrap los() using Box2D physics raycast
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "function los(x1, x2, y1, y2)"
+position = "at"
+payload = '''
+function los(x1, x2, y1, y2)
+  if los_physics then
+    return los_physics.checkLOS(x1, x2, y1, y2)
+  end
+  return vanilla_los(x1, x2, y1, y2)
+end
+
+function vanilla_los(x1, x2, y1, y2)
+'''
+match_indent = true
+
+# Wrap los2() using Box2D physics raycast
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "function los2(shooter, target)"
+position = "at"
+payload = '''
+function los2(shooter, target)
+  if los_physics then
+    return los_physics.checkLOS2(shooter, target)
+  end
+  return vanilla_los2(shooter, target)
+end
+
+function vanilla_los2(shooter, target)
+'''
+match_indent = true
+
+# Invalidate hazards on mineDetect
 [[patches]]
 [patches.pattern]
 target = "includes/urb_engine.lua"
@@ -480,7 +420,7 @@ payload = '''
 '''
 match_indent = true
 
-# 12. urb_engine.lua: Invalidate hazards on mineDisarm
+# Invalidate hazards on mineDisarm
 [[patches]]
 [patches.pattern]
 target = "includes/urb_engine.lua"
@@ -498,7 +438,7 @@ payload = '''
 '''
 match_indent = true
 
-# 13. urb_engine.lua: Invalidate hazards on mineGrab
+# Invalidate hazards on mineGrab
 [[patches]]
 [patches.pattern]
 target = "includes/urb_engine.lua"
@@ -520,7 +460,7 @@ payload = '''
 '''
 match_indent = true
 
-# 14. urb_engine.lua: Invalidate hazards on reconReveal
+# Invalidate hazards on reconReveal
 [[patches]]
 [patches.pattern]
 target = "includes/urb_engine.lua"
@@ -540,16 +480,173 @@ payload = '''
 '''
 match_indent = true
 
-# 15. drawFiles.lua: Debug NavGrid rendering
+# Trigger Decal Baker clean on broomerButton
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+function broomerButton()
+  player.broomTimer = 30
+'''
+position = "at"
+payload = '''
+function broomerButton()
+  player.broomTimer = 30
+  if decal_baker then decal_baker.on_broom_cleaned() end
+'''
+match_indent = true
+
+# Prune excess decals when changing max decals option
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+function op_decal1Button()
+  player.option_maxDecals = 1
+end
+function op_decal2Button()
+  player.option_maxDecals = 2
+end
+function op_decal3Button()
+  player.option_maxDecals = 3
+end
+function op_decal4Button()
+  player.option_maxDecals = 4
+end
+function op_decal5Button()
+  player.option_maxDecals = 5
+end
+'''
+position = "at"
+payload = '''
+function op_decal1Button()
+  player.option_maxDecals = 1
+  if decal_baker then decal_baker.clean_excess() end
+end
+function op_decal2Button()
+  player.option_maxDecals = 2
+  if decal_baker then decal_baker.clean_excess() end
+end
+function op_decal3Button()
+  player.option_maxDecals = 3
+  if decal_baker then decal_baker.clean_excess() end
+end
+function op_decal4Button()
+  player.option_maxDecals = 4
+  if decal_baker then decal_baker.clean_excess() end
+end
+function op_decal5Button()
+  player.option_maxDecals = 5
+  if decal_baker then decal_baker.clean_excess() end
+end
+'''
+match_indent = true
+
+# Mod option button click handlers
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "function op_musicButton()"
+position = "before"
+payload = '''
+function op_pathfindingButton()
+  local cur = (modSettings and modSettings.pathfindingEnabled) or (player and player.option_pathfindingEnabled) or 1
+  local nVal = (cur == 0) and 1 or 0
+  if modSettings then modSettings.pathfindingEnabled = nVal end
+  if player then player.option_pathfindingEnabled = nVal end
+  if saveModSettings then saveModSettings() end
+end
+
+function op_safeDestinationButton()
+  local cur = (modSettings and modSettings.safeDestinationEnabled) or (player and player.option_safeDestinationEnabled) or 1
+  local nVal = (cur == 0) and 1 or 0
+  if modSettings then modSettings.safeDestinationEnabled = nVal end
+  if player then player.option_safeDestinationEnabled = nVal end
+  if saveModSettings then saveModSettings() end
+end
+'''
+match_indent = true
+
+# Default options in newProfile
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "player.borderLess = 0"
+position = "after"
+payload = '''
+  player.option_pathfindingEnabled = 1
+  player.option_safeDestinationEnabled = 1
+'''
+match_indent = true
+
+# Default options in updateProfile
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = 'print("patching for 0.5.1")'
+position = "after"
+payload = '''
+  if(player.option_pathfindingEnabled == nil) then
+    player.option_pathfindingEnabled = 1
+  end
+  if(player.option_safeDestinationEnabled == nil) then
+    player.option_safeDestinationEnabled = 1
+  end
+'''
+match_indent = true
+
+# Sync options on menu_classicButton
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "player.trenchModeRank = trenchRank"
+position = "after"
+payload = '''
+  if loadModSettings then loadModSettings() end
+  if modSettings then
+    player.option_pathfindingEnabled = modSettings.pathfindingEnabled
+    player.option_safeDestinationEnabled = modSettings.safeDestinationEnabled
+  end
+'''
+match_indent = true
+
+# =========================================================================
+# RENDERING & CANVAS (includes/drawFiles.lua)
+# =========================================================================
+
+# Combined debug overlays (LOS and NavGrid)
 [[patches]]
 [patches.pattern]
 target = "includes/drawFiles.lua"
 pattern = "--cues"
 position = "before"
 payload = '''
-  if pathfinding then
-    pathfinding.drawDebug()
-  end
+    if los_physics then
+      los_physics.drawDebugOverlay()
+    end
+    if pathfinding then
+      pathfinding.drawDebug()
+    end
 '''
 match_indent = true
 
+# Decal Baker canvas rendering
+[[patches]]
+[patches.pattern]
+target = "includes/drawFiles.lua"
+pattern = '''
+  for n=1, #player.deco, 1 do
+    love.graphics.draw( _G[player.deco[n].name], player.deco[n].x, player.deco[n].y, player.deco[n].rotation, player.deco[n].size/10, player.deco[n].size/10, _G[player.deco[n].name]:getWidth( )/2, _G[player.deco[n].name]:getHeight( )/2)
+  end
+'''
+position = "at"
+payload = '''
+  if decal_baker then
+    decal_baker.draw()
+  else
+    for n=1, #player.deco, 1 do
+      love.graphics.draw( _G[player.deco[n].name], player.deco[n].x, player.deco[n].y, player.deco[n].rotation, player.deco[n].size/10, player.deco[n].size/10, _G[player.deco[n].name]:getWidth( )/2, _G[player.deco[n].name]:getHeight( )/2)
+    end
+  end
+'''
+match_indent = true

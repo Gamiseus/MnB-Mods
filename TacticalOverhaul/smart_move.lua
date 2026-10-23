@@ -1,21 +1,19 @@
 -- ============================================================================
 -- includes/smart_move.lua
--- Section 1.2: Smart Weighted Player Squad Movement & Formation Assignment
+-- Tactical Squad Formation, Role Assignment & Veterancy Weighting
 -- ============================================================================
--- Replaces the vanilla random scatter (+100 - randNbr(200)) when mass-selecting
--- soldiers with a tactical slot matcher driven by:
---   1. Veterancy & Tactical Weight W_vet(s) from combat skill, rank, XP,
---      missions survived (patrols + combatTime), and kills.
---   2. Class & Weapon Role Profiles (Point/Assault, Rifle Line, Heavy Gunner/AT,
---      Sniper/Recon Overwatch, Command/Comms/Mortar Support, and Medic Triage).
---   3. Real Cover, Concealment, Box2D Sightline Scoring, and Anti-Grenade Spacing.
+-- Automatically distributes squad move orders into intelligent tactical
+-- formation slots based on:
+--   1. Combat Veterancy Weight W_vet(s) (Skill, Rank, XP, Survival, Kills).
+--   2. Tactical Role Profiles (Point Assault, Line, Heavy MG/AT, Recon, Medic).
+--   3. Tactical Terrain Cover, Trench Depth, Concealment, and LOS Sightlines.
+--   4. Anti-Grenade Spacing & Medic Proximity Triage.
 -- ============================================================================
 
 local smart_move = {}
 
 smart_move.MIN_SPACING = 44 -- Minimum pixel spacing between assigned squadmates
 
--- Store last assignment metadata for optional debug visualization
 smart_move.lastAssignment = {
   clickX = 0,
   clickY = 0,
@@ -39,20 +37,10 @@ function smart_move.computeVeterancyWeight(dude)
     return 0, { skill = 0, rank = 0, xp = 0, survival = 0, kills = 0 }
   end
 
-  -- Combat skill (typically 25..100+)
-  local skillRaw = dude.skill or 30
-  local skillScore = clamp(skillRaw, 0, 100)
+  local skillScore = clamp(dude.skill or 30, 0, 100)
+  local rankScore = clamp((dude.rank or 0) * 9 + ((dude.level or 1) - 1) * 3, 0, 100)
+  local xpScore = clamp(dude.xp or 0, 0, 100)
 
-  -- Military rank (0..11+) and level
-  local rankRaw = dude.rank or 0
-  local levelRaw = dude.level or 1
-  local rankScore = clamp(rankRaw * 9 + (levelRaw - 1) * 3, 0, 100)
-
-  -- Direct experience (0..100+)
-  local xpRaw = dude.xp or 0
-  local xpScore = clamp(xpRaw, 0, 100)
-
-  -- Missions survived (patrols) & combat time survived (seconds)
   local patrols = math.max(0, dude.patrols or dude.missions or 0)
   local combatTime = math.max(0, dude.combatTime or 0)
   local survivalScore = clamp(
@@ -60,7 +48,6 @@ function smart_move.computeVeterancyWeight(dude)
     0, 100
   )
 
-  -- Kills (total kills + bonus for close-quarters / shotgun kills)
   local kills = math.max(0, dude.kills or 0)
   local hthKills = math.max(0, dude.hthKills or 0)
   local sgKills = math.max(0, dude.sgKills or 0)
@@ -69,7 +56,6 @@ function smart_move.computeVeterancyWeight(dude)
     0, 100
   )
 
-  -- Weighted combination + small bonus for earned awards/perks
   local awardBonus = (dude.awards and #dude.awards or 0) * 1.5
   local perkBonus = (dude.perks and #dude.perks or 0) * 2.0
 
@@ -104,25 +90,25 @@ function smart_move.classifyRole(dude)
   local waction = w.action or ""
   local wrange = w.range or 300
 
-  -- 1. Medic (prioritizes wounded triage or sheltered rear cover)
+  -- 1. Medic (triage priority)
   if spec == "medic" or (dude.doc or 0) > 0 or (dude.medicBag or 0) > 0 or (dude.medic or 0) > 0 then
     return "medic"
   end
 
-  -- 2. Sniper / Long-Range Recon (prioritizes rear overwatch + concealment + sightlines)
+  -- 2. Sniper / Long-Range Recon (rear overwatch, concealment, sightlines)
   if spec == "sniper" or (dude.masterSniper or 0) > 0
      or wtag == "scopedSpringfield" or wtag == "scopedGarand" or wtag == "scopedEnfield" or wtag == "scopedK98" or wtag == "g98"
-     or wrange >= 430 then
+     or wrange >= 430 or spec == "scout" or spec == "intel" then
     return "sniper_recon"
   end
 
-  -- 3. Command / Radio / Mortar Support (prioritizes sheltered rear cover)
+  -- 3. Command / Support (rear sheltered cover)
   if spec == "officer" or spec == "sarge" or spec == "comms"
      or (dude.officerHat or 0) > 0 or (dude.mortar or 0) > 0 or (dude.radio or 0) > 0 then
     return "command_support"
   end
 
-  -- 4. Heavy Gunner / Anti-Tank Overwatch (prioritizes hard cover + clear forward LOS)
+  -- 4. Heavy Gunner / Anti-Tank (hard cover, clear forward sightlines)
   if spec == "gunner"
      or (dude.bazooka or 0) > 0 or (dude.shrek or 0) > 0
      or (dude.boysRifle or 0) > 0 or (dude.pz39 or 0) > 0
@@ -132,7 +118,7 @@ function smart_move.classifyRole(dude)
     return "heavy_gunner_at"
   end
 
-  -- 5. Point / Close-Quarters Assault (prioritizes forward hard cover)
+  -- 5. Point / Assault (forward hard cover)
   if spec == "commando" or spec == "sapper" or spec == "engy" or spec == "pointMan"
      or (dude.flamer or 0) > 0
      or wclass == "smg" or wclass == "shotgun"
@@ -141,16 +127,11 @@ function smart_move.classifyRole(dude)
     return "point_assault"
   end
 
-  -- 6. Scout with medium-range rifle -> slight overwatch/flank preference
-  if spec == "scout" or spec == "intel" then
-    return "sniper_recon"
-  end
-
   return "rifle_line"
 end
 
 -- ----------------------------------------------------------------------------
--- 3. Determine Threat Direction Unit Vector (ux, uy) from (clickX, clickY)
+-- 3. Threat Vector Estimation (ux, uy)
 -- ----------------------------------------------------------------------------
 function smart_move.determineThreatVector(clickX, clickY)
   local sumX, sumY, totalW = 0, 0, 0
@@ -191,53 +172,24 @@ function smart_move.determineThreatVector(clickX, clickY)
   end
 
   if totalW > 0 then
-    local tx = sumX / totalW
-    local ty = sumY / totalW
-    local vx = tx - clickX
-    local vy = ty - clickY
+    local vx = (sumX / totalW) - clickX
+    local vy = (sumY / totalW) - clickY
     local len = math.sqrt(vx * vx + vy * vy)
     if len > 1 then
       return vx / len, vy / len
     end
   end
 
-  -- Default directional fallback by game mode
-  if player and player.gameType == 1 and player.mnb2SubGame ~= 8 then
-    -- Classic Defense mode: Germans advance from North (top) to South (bottom), or East in some modes
-    return 1.0, 0.0
-  end
-  -- Campaign & Trench mode: Germans are to the East (+X)
   return 1.0, 0.0
 end
 
 -- ----------------------------------------------------------------------------
--- Helper: Evaluate terrain & cover quality at a world point (wx, wy)
+-- 4. Evaluate Terrain Quality at Point
 -- ----------------------------------------------------------------------------
-local function evaluatePointTerrain(wx, wy, ux, uy, allowBuildingClick)
-  local maxX = (player and player.endLine) and (player.endLine + 200) or 2000
-  local maxY = (player and player.mapHeight) or 720
-  if wx < 16 or wx > maxX or wy < 18 or wy > (maxY - 18) then
-    return nil
-  end
-
-  -- Reject active fires
-  if player and player.fire then
-    for i = 1, #player.fire do
-      local f = player.fire[i]
-      if f and f.x and f.y then
-        local dx = wx - f.x
-        local dy = wy - f.y
-        local rad = math.max(36, (f.size or 0.5) * 45 + 24)
-        if (dx * dx + dy * dy) < (rad * rad) then
-          return nil
-        end
-      end
-    end
-  end
-
-  -- Check pathfinding walkability (pass nil for allowBuildingId to permit valid building destinations)
+local function evaluatePointTerrain(wx, wy, ux, uy)
+  -- Delegate walkability, wire, fire, mine, and obstacle safety to GCore
   if pathfinding and pathfinding.isWalkableWorld then
-    local walkable, cellCost = pathfinding.isWalkableWorld(wx, wy, nil, nil)
+    local walkable, cellCost = pathfinding.isWalkableWorld(wx, wy)
     if not walkable or (cellCost and cellCost >= 5.0) then
       return nil
     end
@@ -247,16 +199,14 @@ local function evaluatePointTerrain(wx, wy, ux, uy, allowBuildingClick)
   local concealmentVal = 0
   local isSlow = false
 
-  -- Check groundType cover / hazards
+  -- GroundType Cover
   if player and player.groundType then
     for u = 1, #player.groundType do
       local g = player.groundType[u]
       if g and g.x and g.y then
         local inside = false
         if (g.radius or 0) > 0 then
-          local dx = wx - g.x
-          local dy = wy - g.y
-          if (dx * dx + dy * dy) <= (g.radius * g.radius) then
+          if (wx - g.x)^2 + (wy - g.y)^2 <= (g.radius * g.radius) then
             inside = true
           end
         elseif (g.width or 0) > 0 and (g.length or 0) > 0 then
@@ -266,23 +216,15 @@ local function evaluatePointTerrain(wx, wy, ux, uy, allowBuildingClick)
         end
 
         if inside then
-          local gname = g.name or ""
-          if gname == "wire" or gname == "entanglement" then
-            return nil -- Never intentionally place soldiers onto barbed wire
-          end
-          if g.slowy == "yes" or gname == "mud" or gname == "water" then
+          if g.slowy == "yes" or g.name == "mud" or g.name == "water" then
             isSlow = true
           end
           local c = g.cover or 0
           if c > 0 then
-            -- If directional cover (midpoint ~= 0), verify friendly side
             local goodSide = true
             if (g.midpoint or 0) ~= 0 then
-              if ux >= 0 and wx > g.midpoint then
-                goodSide = false
-              elseif ux < 0 and wx < g.midpoint then
-                goodSide = false
-              end
+              if ux >= 0 and wx > g.midpoint then goodSide = false
+              elseif ux < 0 and wx < g.midpoint then goodSide = false end
             end
             if goodSide and c > coverVal then
               coverVal = c
@@ -293,17 +235,12 @@ local function evaluatePointTerrain(wx, wy, ux, uy, allowBuildingClick)
     end
   end
 
-  -- Check forest & rock concealment
+  -- Forest & Rock Concealment
   if player and player.forest then
     for i = 1, #player.forest do
       local f = player.forest[i]
-      if f and f.x and f.y then
-        local dx = wx - f.x
-        local dy = wy - f.y
-        local rad = f.radius or 55
-        if (dx * dx + dy * dy) <= (rad * rad) then
-          concealmentVal = math.max(concealmentVal, 24)
-        end
+      if f and f.x and f.y and (wx - f.x)^2 + (wy - f.y)^2 <= ((f.radius or 55)^2) then
+        concealmentVal = math.max(concealmentVal, 24)
       end
     end
   end
@@ -311,18 +248,13 @@ local function evaluatePointTerrain(wx, wy, ux, uy, allowBuildingClick)
   if player and player.rocks then
     for i = 1, #player.rocks do
       local r = player.rocks[i]
-      if r and r.x and r.y then
-        local dx = wx - r.x
-        local dy = wy - r.y
-        local rad = (r.radius or 40) + 18
-        if (dx * dx + dy * dy) <= (rad * rad) then
-          concealmentVal = math.max(concealmentVal, 28)
-        end
+      if r and r.x and r.y and (wx - r.x)^2 + (wy - r.y)^2 <= (((r.radius or 40) + 18)^2) then
+        concealmentVal = math.max(concealmentVal, 28)
       end
     end
   end
 
-  -- Check building interior shelter & cover
+  -- Building Cover
   local insideBuilding = false
   if player and player.buildings then
     for b = 1, #player.buildings do
@@ -335,15 +267,7 @@ local function evaluatePointTerrain(wx, wy, ux, uy, allowBuildingClick)
         if bw > 0 and bl > 0 then
           local minX = (bld.centered == false) and bx or (bx - bw * 0.5)
           local minY = (bld.centered == false) and by or (by - bl * 0.5)
-          local maxX = minX + bw
-          local maxY = minY + bl
-          if wx >= minX and wx <= maxX and wy >= minY and wy <= maxY then
-            insideBuilding = true
-            break
-          end
-        else
-          local rad = (bld.radius or 90) * 0.45
-          if ((wx - bx)^2 + (wy - by)^2) <= (rad * rad) then
+          if wx >= minX and wx <= minX + bw and wy >= minY and wy <= minY + bl then
             insideBuilding = true
             break
           end
@@ -356,11 +280,10 @@ local function evaluatePointTerrain(wx, wy, ux, uy, allowBuildingClick)
     coverVal = math.max(coverVal, 48)
   end
 
-  -- Sightline score using Box2D raycast along threat vector (ux, uy)
+  -- Sightline evaluation via GCore Box2D Physics LOS
   local sightlineVal = 20
   if los_physics and los_physics.castRay then
-    local probeDist = 280
-    local hitAny, _, _, bestFrac = los_physics.castRay(wx + ux * 18, wy + uy * 18, wx + ux * probeDist, wy + uy * probeDist)
+    local hitAny, _, _, bestFrac = los_physics.castRay(wx + ux * 18, wy + uy * 18, wx + ux * 280, wy + uy * 280)
     if not hitAny then
       sightlineVal = 30
     else
@@ -368,7 +291,6 @@ local function evaluatePointTerrain(wx, wy, ux, uy, allowBuildingClick)
     end
   end
 
-  -- Soldiers in buildings shoot through windows/doors; don't penalize sightline for building walls
   if insideBuilding then
     sightlineVal = math.max(sightlineVal, 24)
   end
@@ -384,15 +306,12 @@ local function evaluatePointTerrain(wx, wy, ux, uy, allowBuildingClick)
 end
 
 -- ----------------------------------------------------------------------------
--- 4. Generate Candidate Tactical Slots around (clickX, clickY)
+-- 5. Candidate Tactical Slots
 -- ----------------------------------------------------------------------------
 function smart_move.generateCandidateSlots(clickX, clickY, squadCount, ux, uy)
   local candidates = {}
   local searchRadius = math.min(280, 150 + (squadCount or 4) * 16)
-
-  -- Perpendicular lateral vector (lx, ly)
   local lx, ly = -uy, ux
-
 
   local function tryAddCandidate(wx, wy, tag)
     local info = evaluatePointTerrain(wx, wy, ux, uy)
@@ -407,46 +326,20 @@ function smart_move.generateCandidateSlots(clickX, clickY, squadCount, ux, uy)
     end
   end
 
-  -- A. Sample nearby hard cover zones (player.groundType with cover > 0)
+  -- 1. Sample hard cover zones (groundType)
   if player and player.groundType then
     for u = 1, #player.groundType do
       local g = player.groundType[u]
       if g and (g.cover or 0) > 0 and g.x and g.y then
-        if (g.radius or 0) > 0 then
-          local dx = g.x - clickX
-          local dy = g.y - clickY
-          if (dx * dx + dy * dy) <= (searchRadius + g.radius) * (searchRadius + g.radius) then
-            tryAddCandidate(g.x, g.y, "cover")
-            local rStep = math.min(g.radius * 0.6, 36)
-            if rStep >= 18 then
-              for a = 0, 5 do
-                local ang = a * (math.pi / 3)
-                tryAddCandidate(g.x + math.cos(ang) * rStep, g.y + math.sin(ang) * rStep, "cover")
-              end
-            end
-          end
-        elseif (g.width or 0) > 0 and (g.length or 0) > 0 then
+        if (g.width or 0) > 0 and (g.length or 0) > 0 then
           local cx = g.x + g.width * 0.5
           local cy = g.y + g.length * 0.5
-          local dx = cx - clickX
-          local dy = cy - clickY
-          local maxDim = math.max(g.width, g.length) * 0.5
-          if (dx * dx + dy * dy) <= (searchRadius + maxDim) * (searchRadius + maxDim) then
+          if (cx - clickX)^2 + (cy - clickY)^2 <= (searchRadius + 60)^2 then
             local stepX = math.max(36, math.min(52, g.width / 3))
             local stepY = math.max(36, math.min(52, g.length / 3))
-            local padX = math.min(14, g.width * 0.25)
-            local padY = math.min(14, g.length * 0.25)
-            if g.width <= 36 then
-              padX = g.width * 0.5
-            end
-            if g.length <= 36 then
-              padY = g.length * 0.5
-            end
-            for sx = g.x + padX, g.x + g.width - padX + 1, stepX do
-              for sy = g.y + padY, g.y + g.length - padY + 1, stepY do
-                if (sx - clickX) * (sx - clickX) + (sy - clickY) * (sy - clickY) <= (searchRadius + 40) * (searchRadius + 40) then
-                  tryAddCandidate(sx, sy, "cover")
-                end
+            for sx = g.x + 14, g.x + g.width - 14, stepX do
+              for sy = g.y + 14, g.y + g.length - 14, stepY do
+                tryAddCandidate(sx, sy, "cover")
               end
             end
           end
@@ -455,36 +348,22 @@ function smart_move.generateCandidateSlots(clickX, clickY, squadCount, ux, uy)
     end
   end
 
-  -- B. Sample interior positions of nearby intact buildings / bunkers
+  -- 2. Sample building interiors
   if player and player.buildings then
     for b = 1, #player.buildings do
       local bld = player.buildings[b]
-      if bld and (bld.destroyed or 0) < 1 and (bld.impassable or 0) == 0 and (bld.noGoZone or 0) == 0 then
+      if bld and (bld.destroyed or 0) < 1 and (bld.impassable or 0) == 0 then
         local bx = bld.x or 0
         local by = bld.y or 0
         local bw = bld.width or 0
         local bl = bld.length or bld.height or 0
-        local dist2 = (bx - clickX)^2 + (by - clickY)^2
-        if dist2 <= (searchRadius + 140)^2 then
+        if (bx - clickX)^2 + (by - clickY)^2 <= (searchRadius + 120)^2 then
           if bw > 0 and bl > 0 then
             local minX = (bld.centered == false) and bx or (bx - bw * 0.5)
             local minY = (bld.centered == false) and by or (by - bl * 0.5)
-            local maxX = minX + bw
-            local maxY = minY + bl
-            local pad = 16
-            local step = 32
-            for sx = minX + pad, maxX - pad, step do
-              for sy = minY + pad, maxY - pad, step do
+            for sx = minX + 16, minX + bw - 16, 32 do
+              for sy = minY + 16, minY + bl - 16, 32 do
                 tryAddCandidate(sx, sy, "building_cover")
-              end
-            end
-          else
-            local rad = (bld.radius or 90) * 0.4
-            tryAddCandidate(bx, by, "building_cover")
-            if rad >= 20 then
-              for a = 0, 3 do
-                local ang = a * (math.pi / 2)
-                tryAddCandidate(bx + math.cos(ang) * (rad * 0.6), by + math.sin(ang) * (rad * 0.6), "building_cover")
               end
             end
           end
@@ -493,20 +372,15 @@ function smart_move.generateCandidateSlots(clickX, clickY, squadCount, ux, uy)
     end
   end
 
-  -- B. Sample sheltered spots behind rocks & trees (player.rocks / player.forest)
+  -- 3. Sample rocks & trees
   if player and player.rocks then
     for i = 1, #player.rocks do
       local r = player.rocks[i]
-      if r and r.x and r.y then
-        local dx = r.x - clickX
-        local dy = r.y - clickY
-        if (dx * dx + dy * dy) <= searchRadius * searchRadius then
-          local offset = (r.radius or 35) + 16
-          -- Sheltered side opposite threat vector (ux, uy)
-          tryAddCandidate(r.x - ux * offset, r.y - uy * offset, "rock_cover")
-          tryAddCandidate(r.x - ux * offset + lx * 24, r.y - uy * offset + ly * 24, "rock_cover")
-          tryAddCandidate(r.x - ux * offset - lx * 24, r.y - uy * offset - ly * 24, "rock_cover")
-        end
+      if r and r.x and r.y and (r.x - clickX)^2 + (r.y - clickY)^2 <= searchRadius^2 then
+        local offset = (r.radius or 35) + 16
+        tryAddCandidate(r.x - ux * offset, r.y - uy * offset, "rock_cover")
+        tryAddCandidate(r.x - ux * offset + lx * 24, r.y - uy * offset + ly * 24, "rock_cover")
+        tryAddCandidate(r.x - ux * offset - lx * 24, r.y - uy * offset - ly * 24, "rock_cover")
       end
     end
   end
@@ -514,26 +388,21 @@ function smart_move.generateCandidateSlots(clickX, clickY, squadCount, ux, uy)
   if player and player.forest then
     for i = 1, #player.forest do
       local f = player.forest[i]
-      if f and f.x and f.y then
-        local dx = f.x - clickX
-        local dy = f.y - clickY
-        if (dx * dx + dy * dy) <= searchRadius * searchRadius then
-          tryAddCandidate(f.x - ux * 18, f.y - uy * 18, "forest_conceal")
-          tryAddCandidate(f.x + lx * 32, f.y + ly * 32, "forest_conceal")
-          tryAddCandidate(f.x - lx * 32, f.y - ly * 32, "forest_conceal")
-        end
+      if f and f.x and f.y and (f.x - clickX)^2 + (f.y - clickY)^2 <= searchRadius^2 then
+        tryAddCandidate(f.x - ux * 18, f.y - uy * 18, "forest_conceal")
+        tryAddCandidate(f.x + lx * 32, f.y + ly * 32, "forest_conceal")
+        tryAddCandidate(f.x - lx * 32, f.y - ly * 32, "forest_conceal")
       end
     end
   end
 
-  -- C. Tactical Formation Slots (Forward Line, Main Line, Rear Support, Sniper Overwatch)
+  -- 4. Formation Chevrons & Depth Tiers
   local depthTiers = { 42, 16, 0, -24, -56, -96, -144 }
   local maxCols = math.max(5, math.ceil((squadCount or 4) * 0.85) + 2)
   local latSpacing = 48
 
   for _, depth in ipairs(depthTiers) do
     for col = -maxCols, maxCols do
-      -- Slight chevron/stagger so soldiers aren't in a rigid robotic line
       local stagger = (math.abs(col) % 2 == 1) and -10 or 0
       local wx = clickX + ux * (depth + stagger) + lx * (col * latSpacing)
       local wy = clickY + uy * (depth + stagger) + ly * (col * latSpacing)
@@ -545,69 +414,42 @@ function smart_move.generateCandidateSlots(clickX, clickY, squadCount, ux, uy)
 end
 
 -- ----------------------------------------------------------------------------
--- Score a Candidate Slot for a Specific Soldier Role & Veterancy Weight
+-- 6. Role & Veterancy Slot Scoring
 -- ----------------------------------------------------------------------------
 local function scoreSlotForSoldier(slot, role, vetWeight)
-  -- Baseline cover encouragement: even a rookie with 0 XP gets a strong base incentive for cover (+35 flat, 2.0x cover)
-  local baseCover = 0
-  if (slot.cover or 0) > 0 then
-    baseCover = 35.0 + (slot.cover * 2.0)
-  end
-  local vetCoverBonus = (slot.cover or 0) * (vetWeight / 100.0) * 1.5
-  local coverScore = baseCover + vetCoverBonus
-
+  local baseCover = (slot.cover or 0) > 0 and (35.0 + slot.cover * 2.0) or 0
+  local coverScore = baseCover + (slot.cover or 0) * (vetWeight / 100.0) * 1.5
   local concealScore = (slot.concealment or 0) * (0.9 + (vetWeight / 100.0) * 0.5)
   local sightScore = slot.sightline or 20
   local depth = slot.forwardDepth or 0
 
-  -- For cover slots, reduce distance penalty so troops readily take nearby cover
   local distRate = (slot.cover and slot.cover > 0) and 0.08 or 0.22
   local distPenalty = (slot.distFromClick or 0) * distRate
   local slowPenalty = slot.slow and 25 or 0
 
   local roleScore = 0
   if role == "point_assault" then
-    roleScore = coverScore * 1.65 + concealScore * 0.7 + sightScore * 0.7
-    local idealDepth = 32
-    roleScore = roleScore - math.abs(depth - idealDepth) * 0.45
+    roleScore = coverScore * 1.65 + concealScore * 0.7 + sightScore * 0.7 - math.abs(depth - 32) * 0.45
   elseif role == "heavy_gunner_at" then
-    roleScore = coverScore * 1.75 + concealScore * 0.8 + sightScore * 1.85
-    local idealDepth = 8
-    roleScore = roleScore - math.abs(depth - idealDepth) * 0.40
+    roleScore = coverScore * 1.75 + concealScore * 0.8 + sightScore * 1.85 - math.abs(depth - 8) * 0.40
   elseif role == "sniper_recon" then
-    roleScore = coverScore * 1.35 + concealScore * 1.75 + sightScore * 1.65
-    local idealDepth = -105
-    roleScore = roleScore - math.abs(depth - idealDepth) * 0.55
-    if depth <= -50 then
-      roleScore = roleScore + 35
-    end
+    roleScore = coverScore * 1.35 + concealScore * 1.75 + sightScore * 1.65 - math.abs(depth - (-105)) * 0.55
+    if depth <= -50 then roleScore = roleScore + 35 end
   elseif role == "command_support" then
-    roleScore = coverScore * 1.60 + concealScore * 1.25 + sightScore * 0.50
-    local idealDepth = -75
-    roleScore = roleScore - math.abs(depth - idealDepth) * 0.50
-    if depth <= -35 then
-      roleScore = roleScore + 25
-    end
+    roleScore = coverScore * 1.60 + concealScore * 1.25 + sightScore * 0.50 - math.abs(depth - (-75)) * 0.50
+    if depth <= -35 then roleScore = roleScore + 25 end
   else
-    -- "rifle_line": strong baseline appreciation for cover + sightlines
-    roleScore = coverScore * 1.65 + concealScore * 1.0 + sightScore * 1.0
-    local idealDepth = 5
-    roleScore = roleScore - math.abs(depth - idealDepth) * 0.40
+    roleScore = coverScore * 1.65 + concealScore * 1.0 + sightScore * 1.0 - math.abs(depth - 5) * 0.40
   end
 
   return roleScore - distPenalty - slowPenalty
 end
 
--- ----------------------------------------------------------------------------
--- Check if (x, y) respects anti-grenade spacing against claimed slots
--- ----------------------------------------------------------------------------
 local function isSlotSpaced(wx, wy, claimedSlots, minSpacing)
   local minD2 = minSpacing * minSpacing
   for i = 1, #claimedSlots do
     local c = claimedSlots[i]
-    local dx = wx - c.x
-    local dy = wy - c.y
-    if (dx * dx + dy * dy) < minD2 then
+    if (wx - c.x)^2 + (wy - c.y)^2 < minD2 then
       return false
     end
   end
@@ -615,8 +457,7 @@ local function isSlotSpaced(wx, wy, claimedSlots, minSpacing)
 end
 
 -- ----------------------------------------------------------------------------
--- 5. Assign Tactical Destinations to a Selected Group of Player Soldiers
--- Returns: assignments array { { soldier = s, x = ..., y = ..., role = ..., weight = ... }, ... }
+-- 7. Main Squad Assignment Engine
 -- ----------------------------------------------------------------------------
 function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
   if not selectedSoldiers or #selectedSoldiers == 0 then
@@ -626,8 +467,6 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
   local ux, uy = smart_move.determineThreatVector(clickX, clickY)
   local candidates = smart_move.generateCandidateSlots(clickX, clickY, #selectedSoldiers, ux, uy)
 
-  -- Separate medics from combat/support troops so medics can position relative
-  -- to wounded squadmates' assigned slots (or behind squad center of mass)
   local combatEntries = {}
   local medicEntries = {}
 
@@ -635,12 +474,7 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
     local s = selectedSoldiers[i]
     local wVet, breakdown = smart_move.computeVeterancyWeight(s)
     local role = smart_move.classifyRole(s)
-    local entry = {
-      soldier = s,
-      weight = wVet,
-      breakdown = breakdown,
-      role = role
-    }
+    local entry = { soldier = s, weight = wVet, breakdown = breakdown, role = role }
     if role == "medic" then
       medicEntries[#medicEntries + 1] = entry
     else
@@ -648,7 +482,7 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
     end
   end
 
-  -- Sort combat entries in descending order of Veterancy Weight W_vet
+  -- Sort combat troops by veterancy: experienced veterans take prime cover first
   table.sort(combatEntries, function(a, b)
     if math.abs(a.weight - b.weight) > 0.01 then
       return a.weight > b.weight
@@ -663,31 +497,29 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
   local claimedSlots = {}
   local assignments = {}
 
-  -- Pre-populate claimedSlots with stationary unselected living allies already at destination
+  -- Avoid displacing stationary unselected allies already at destination
   if player and player.deployedTroops then
     local selectedSet = {}
-    for i = 1, #selectedSoldiers do
-      selectedSet[selectedSoldiers[i]] = true
-    end
+    for i = 1, #selectedSoldiers do selectedSet[selectedSoldiers[i]] = true end
     for i = 1, #player.deployedTroops do
       local t = player.deployedTroops[i]
       if t and t.faction == "allied" and (t.health or 0) > 10 and (t.dead or 0) == 0 and not selectedSet[t] then
         local tx = t.targetx or t.x
         local ty = t.targety or t.y
-        if (tx - clickX) * (tx - clickX) + (ty - clickY) * (ty - clickY) < (260 * 260) then
+        if (tx - clickX)^2 + (ty - clickY)^2 < (260 * 260) then
           claimedSlots[#claimedSlots + 1] = { x = tx, y = ty, stationary = true }
         end
       end
     end
   end
 
-  -- Assign combat/support soldiers in descending veterancy order
+  -- Assign combat soldiers
   for i = 1, #combatEntries do
     local entry = combatEntries[i]
     local bestSlot = nil
     local bestScore = -math.huge
 
-    -- Pass 1: strict anti-grenade spacing (44 px)
+    -- Strict spacing (44px)
     for c = 1, #candidates do
       local slot = candidates[c]
       if isSlotSpaced(slot.x, slot.y, claimedSlots, smart_move.MIN_SPACING) then
@@ -699,7 +531,7 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
       end
     end
 
-    -- Pass 2: relaxed spacing (28 px) if area is tight
+    -- Relaxed spacing (28px) if congested
     if not bestSlot then
       for c = 1, #candidates do
         local slot = candidates[c]
@@ -717,11 +549,15 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
     if bestSlot then
       finalX, finalY = bestSlot.x, bestSlot.y
     else
-      -- Fallback spiral slot
       local angle = (i - 1) * 2.39996
       local rad = 32 * math.sqrt(i)
-      finalX = clamp(clickX + math.cos(angle) * rad, 20, ((player and player.endLine) or 1280) + 180)
-      finalY = clamp(clickY + math.sin(angle) * rad, 20, 700)
+      finalX = clickX + math.cos(angle) * rad
+      finalY = clickY + math.sin(angle) * rad
+    end
+
+    -- Nudge destination via GCore to guarantee it is 100% walkable and clear of hazards
+    if pathfinding and pathfinding.findSafeDestination then
+      finalX, finalY = pathfinding.findSafeDestination(finalX, finalY, entry.soldier)
     end
 
     claimedSlots[#claimedSlots + 1] = { x = finalX, y = finalY, soldier = entry.soldier }
@@ -731,47 +567,22 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
     assignments[#assignments + 1] = entry
   end
 
-  -- Step 4: Assign Medics near wounded/bleeding allies or sheltered behind squad
+  -- Assign Medics (sheltered behind squad or near wounded squadmates)
   if #medicEntries > 0 then
-    -- Identify wounded allies (either in the moving squad or already deployed near clickX, clickY)
     local woundedTargets = {}
-
     for i = 1, #assignments do
       local a = assignments[i]
       local s = a.soldier
       local maxH = s.maxHealth or 100
       if (s.health or 100) < maxH * 0.85 or (s.health or 100) <= 45 then
         woundedTargets[#woundedTargets + 1] = {
-          x = a.x,
-          y = a.y,
+          x = a.x, y = a.y,
           severity = (maxH - (s.health or 100)) / math.max(1, maxH)
         }
       end
     end
 
-    if player and player.deployedTroops then
-      for i = 1, #player.deployedTroops do
-        local t = player.deployedTroops[i]
-        if t and t.faction == "allied" and (t.dead or 0) == 0 and (t.health or 0) > 0 then
-          local maxH = t.maxHealth or 100
-          if t.health < maxH * 0.85 or t.health <= 45 then
-            local dx = t.x - clickX
-            local dy = t.y - clickY
-            if (dx * dx + dy * dy) <= (340 * 340) then
-              woundedTargets[#woundedTargets + 1] = {
-                x = t.targetx or t.x,
-                y = t.targety or t.y,
-                severity = ((maxH - t.health) / math.max(1, maxH)) + (t.health <= 10 and 2.0 or 0)
-              }
-            end
-          end
-        end
-      end
-    end
-
-    table.sort(woundedTargets, function(a, b)
-      return a.severity > b.severity
-    end)
+    table.sort(woundedTargets, function(a, b) return a.severity > b.severity end)
 
     for m = 1, #medicEntries do
       local mEntry = medicEntries[m]
@@ -780,37 +591,12 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
       local bestScore = -math.huge
 
       if targetPatient then
-        -- Generate extra triage candidate slots right next to the patient (36..58 px away, sheltered behind patient)
-        local lx, ly = -uy, ux
-        local triageOffsets = {
-          { -ux * 44, -uy * 44 },
-          { -ux * 38 + lx * 26, -uy * 38 + ly * 26 },
-          { -ux * 38 - lx * 26, -uy * 38 - ly * 26 },
-          { lx * 44, ly * 44 },
-          { -lx * 44, -ly * 44 },
-          { ux * 40, uy * 40 }
-        }
-        for _, off in ipairs(triageOffsets) do
-          local twx = targetPatient.x + off[1]
-          local twy = targetPatient.y + off[2]
-          local info = evaluatePointTerrain(twx, twy, ux, uy, false)
-          if info then
-            info.forwardDepth = (twx - clickX) * ux + (twy - clickY) * uy
-            info.distFromClick = math.sqrt((twx - clickX) * (twx - clickX) + (twy - clickY) * (twy - clickY))
-            candidates[#candidates + 1] = info
-          end
-        end
-
         for c = 1, #candidates do
           local slot = candidates[c]
           if isSlotSpaced(slot.x, slot.y, claimedSlots, 32) then
-            local dx = slot.x - targetPatient.x
-            local dy = slot.y - targetPatient.y
-            local distToPatient = math.sqrt(dx * dx + dy * dy)
-            if distToPatient >= 28 and distToPatient <= 95 then
-              -- Score closeness to patient + cover + sheltered side behind patient
-              local shelterDot = -((dx * ux + dy * uy) / math.max(1, distToPatient))
-              local sc = (100 - distToPatient) * 1.8 + slot.cover * 1.6 + slot.concealment * 1.1 + shelterDot * 22
+            local dist = math.sqrt((slot.x - targetPatient.x)^2 + (slot.y - targetPatient.y)^2)
+            if dist >= 28 and dist <= 95 then
+              local sc = (100 - dist) * 1.8 + slot.cover * 1.6 + slot.concealment * 1.1
               if sc > bestScore then
                 bestScore = sc
                 bestSlot = slot
@@ -820,7 +606,6 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
         end
       end
 
-      -- If no wounded patient nearby (or no close slot), place medic in sheltered rear cover behind squad
       if not bestSlot then
         for c = 1, #candidates do
           local slot = candidates[c]
@@ -838,11 +623,15 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
       if bestSlot then
         finalX, finalY = bestSlot.x, bestSlot.y
       elseif targetPatient then
-        finalX = clamp(targetPatient.x - ux * 42, 20, ((player and player.endLine) or 1280) + 180)
-        finalY = clamp(targetPatient.y - uy * 42, 20, 700)
+        finalX = targetPatient.x - ux * 42
+        finalY = targetPatient.y - uy * 42
       else
-        finalX = clamp(clickX - ux * 60, 20, ((player and player.endLine) or 1280) + 180)
-        finalY = clamp(clickY - uy * 60, 20, 700)
+        finalX = clickX - ux * 60
+        finalY = clickY - uy * 60
+      end
+
+      if pathfinding and pathfinding.findSafeDestination then
+        finalX, finalY = pathfinding.findSafeDestination(finalX, finalY, mEntry.soldier)
       end
 
       claimedSlots[#claimedSlots + 1] = { x = finalX, y = finalY, soldier = mEntry.soldier }
@@ -853,12 +642,12 @@ function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
     end
   end
 
-  -- Apply assignments to soldiers
+  -- Apply assignments directly to soldiers
   for i = 1, #assignments do
     local a = assignments[i]
     a.soldier.targetx = a.x
     a.soldier.targety = a.y
-    a.soldier._pfGoalX = nil -- Trigger immediate pathfinding check
+    a.soldier._pfGoalX = nil -- Trigger GCore immediate path recalculation
     a.soldier.combatHaltTimer = 0
     a.soldier._savedOrderX = nil
     a.soldier._savedOrderY = nil

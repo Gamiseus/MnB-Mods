@@ -6,11 +6,10 @@
   "authors": [
     "Community Mod Team"
   ],
-  "description": "Multithreaded A* pathfinding, smart squad movement, formation spacing, cover evaluation, and combat interruption behaviors.",
+  "description": "Smart squad movement, formation spacing, cover evaluation, and combat interruption behaviors.",
   "category": "Gameplay",
   "tags": [
     "AI",
-    "Pathfinding",
     "Tactics",
     "Squad"
   ],

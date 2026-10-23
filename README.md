@@ -12,11 +12,12 @@
 - Currently includes features such as
     - Physics based LoS calculations, using library Box2D for raycasting
     - Multi-threading enabled at the engine level, though I haven't messed with it much yet, just a couple threads for pathfinding.
-    - UI scaling, a work in progress to implement true ui scaling and some adjustment to the non-fullscreen window functionality
     - A log monitor, which watches the logs for spam and errors, anomolous log size increases, and notifies you in game if there's a problem
-    - A safeguard I had to implement once modding started causing some issues to arise with the base game not having it's own safeguards in place for things that simply couldn't happen in the vanilla game. campaign_guard.lua mainly just patches a bunch of things to have fallback solutions, like making sure that all slots of the campaign squad are actually filled, since apparently the lua for squads is VERY particular sometimes.
     - A system that bakes static decals in place for performance. Divides the map into canvas chunks, created lazily on demand if more chunks are necessary for the map. Once a new decal spawns (blood, craters, etc), it gets stamped onto the canvas instead of staying as it's own item. Obeys the rules set in the options for max decals by trimming out non-immune decals and rebaking, and is cleaned with the vanilla broom button. Difference is 1 draw call for the canvas (2 during scrolling if there are multiple chunks) instead of hundreds or thousands of draw calls for the individual decals.
     - A serializer for better key filtering on what is saved and what isn't. A bunch of keys that aren't necessary for saving or reloading data get filtered out, reducing file size and loading times, but mainly fixing a bug I ran into with a huge amount of soldiers, decals, and particles in a single save file, causing a crash with `main function has more than 65536 constants` errors that left the save unloadable.
+    - Rewritten multithreaded pathfinding system using A* (A Star) algorithm instead of the game's vanilla pathfinding.
+      - Soldiers will now avoid hazards, route around obstacles like trees and rocks instead of over them so they can maintain line of sight as best as possible. 
+      - Custom terrain grid system written to define what can be walked on, and how much it costs to move through.
 - Required for some mods to function properly, for now just TacticalOverhaul and GSpecialEvents. I have plans to keep consolidating core improvements and fixes in here, of which some mods will call upon rather than using vanilla implementations.
 
 ### GDumper
@@ -43,9 +44,6 @@
       - Snipers look for spots in the rear with either cover or trees to hide in.
       - Much more. These are in progress, so it's not always perfect, but it's super useful for those who don't want to micromanage every soldier every single click, or for moving large distances and just getting them there so you can adjust their specific spots later.
    - A combat reaction system that allows soldiers to interrupt their pathfinding to react to things like newly spotted enemies, incoming fire, and hazards. They evaluate the danger based on what it is and how much of a threat it is to them specifically, can choose to do different actions like returning fire, moving to the nearest good cover away from any threats, continuing on their way, etc. Once they deem it safe or viable, they will resume pathfinding to their original destination. --- Currently very unstable and LOTS of tweaking required, as well as implementation of fallback action in case they get stuck and manual overwriting of movement commands.
-   - Rewritten multithreaded pathfinding system using A* (A Star) algorithm instead of the game's vanilla pathfinding. --- This will be moved to GCore soon, to be integrated as a base game replacement, since it's incredibly useful and allows for other new things to be written based on what it adds. Plus this is what makes the TacticalOverhaul mod dependent on GCore, since the pathfinding is multithreaded.
-      - Soldiers will now avoid hazards, route around obstacles like trees and rocks instead of over them so they can maintain line of sight as best as possible.
-      - Custom terrain grid system written to define what can be walked on, and how much it costs to move through.
 
 ## Contents
 - All of my mods follow a set schema for `mods.json`. This will be important when the mod launcher is finished, as it will define a bunch of the stuff that the launcher will need to read for organization.

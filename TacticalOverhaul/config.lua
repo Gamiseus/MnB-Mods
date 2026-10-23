@@ -51,22 +51,6 @@ local config = {
         if player then player.option_smartMoveEnabled = numVal end
         if saveModSettings then saveModSettings() end
       end
-    },
-    {
-      id = "pathfinding",
-      label = "Tactical Pathfinding",
-      type = "checkbox",
-      default = 1,
-      description = "A* hazard & obstacle avoidance pathfinding for infantry and vehicles (Shift+F9 in-game overlay)",
-      get = function()
-        return (modSettings and modSettings.pathfindingEnabled) or (player and player.option_pathfindingEnabled) or 1
-      end,
-      set = function(val)
-        local numVal = (val == true or val == 1) and 1 or 0
-        if modSettings then modSettings.pathfindingEnabled = numVal end
-        if player then player.option_pathfindingEnabled = numVal end
-        if saveModSettings then saveModSettings() end
-      end
     }
   }
 }
