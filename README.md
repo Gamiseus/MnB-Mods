@@ -2,6 +2,8 @@
 
 ### This repo contains mods for Mud and Blood, mainly that I have made for personal use but others may find useful. The GCore and GConsole mods contain most of the things that others would find useful, and GDumper is really only useful for modders.
 
+### All mods require the **QuarterMaster** mod loader to function! [Find it here!](https://github.com/Gamiseus/QuarterMaster)
+
 ---
 
 ### GConsole - [Download Latest](https://github.com/Gamiseus/MnB-Mods/releases/latest/download/GConsole.zip)
@@ -53,6 +55,6 @@
 - All of my mods follow a set schema for `mods.json`. This will be important when the mod launcher is finished, as it will define a bunch of the stuff that the launcher will need to read for organization. Some mods with in game options menus have a `config.lua` that is loaded by GMenu. All mods **must** contain a `qm.toml` file that contains the patch instructions for the modloader to follow.
 
 ## Install
-- Download the mods in this source
-- Extract the mod folders for what kids you wish to run into the Mods folder inside your Mud and Blood directory. it should look like `Mods/<Modfoldr>/qm.toml`
+- Download the mod(s) you are interested in
+- Extract the contents of the zip file(s) into the Mods folder inside your Mud and Blood directory. The end result should look like `Mods/<Modfolder>/<qm.toml file>`
 - Run the game, it will automatically load all mods within the directory.
