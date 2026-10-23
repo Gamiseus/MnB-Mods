@@ -4,6 +4,7 @@
 -- ============================================================================
 
 local decal_baker = {}
+local broomer_hooked = false
 
 local CHUNK_WIDTH = 1280
 local CHUNK_HEIGHT = 720
@@ -13,18 +14,13 @@ local last_deco_table = nil     -- identity check
 local last_deco_count = 0       -- count of stamped decals
 local dim_cache = {}            -- Image -> {w, h}
 local clean_timer = 0           -- periodic check timer
+local needs_full_rebake = false
 
-local PROTECTED_DECO_NAMES = {
-  trench = true,
-  deepCrater = true,
-  dropZone = true,
-  mortarPit = true,
-  shellScrape = true,
-  defensivePosition = true,
-  pillBox = true,
-  trapDoor_open = true,
-  trapDoor_closed = true,
-}
+-- A decal is immune if the engine marked it with imunity/immunity == 1
+local function is_immune(d)
+  if not d then return true end
+  return (d.imunity == 1 or d.immunity == 1)
+end
 
 local function get_image_dims(img)
   local dims = dim_cache[img]
@@ -59,7 +55,6 @@ end
 local function stamp_range(decal_list, start_idx, end_idx)
   if not decal_list or start_idx > end_idx then return end
 
-  -- Group decals by chunk column
   local batches = {}
 
   for i = start_idx, end_idx do
@@ -108,14 +103,18 @@ local function stamp_range(decal_list, start_idx, end_idx)
   love.graphics.setBlendMode(prev_blend, prev_alpha)
 end
 
+function decal_baker.force_rebake()
+  needs_full_rebake = true
+end
+
 function decal_baker.sync()
   if not player or not player.deco then return end
 
   local current_table = player.deco
   local current_count = #current_table
 
-  if current_table ~= last_deco_table then
-    -- Table reference changed (new game, save loaded, mapReset)
+  if current_table ~= last_deco_table or needs_full_rebake then
+    needs_full_rebake = false
     last_deco_table = current_table
     decal_baker.clear_all()
     if current_count > 0 then
@@ -123,14 +122,14 @@ function decal_baker.sync()
     end
     last_deco_count = current_count
   elseif current_count < last_deco_count then
-    -- Decals were removed (broom cleaner, limit trim) -> rebake
+    -- Decals removed -> wipe and re-render existing
     decal_baker.clear_all()
     if current_count > 0 then
       stamp_range(current_table, 1, current_count)
     end
     last_deco_count = current_count
   elseif current_count > last_deco_count then
-    -- New decals added -> stamp incrementally
+    -- New decals appended -> stamp only the new slice
     stamp_range(current_table, last_deco_count + 1, current_count)
     last_deco_count = current_count
   end
@@ -139,7 +138,6 @@ end
 function decal_baker.draw()
   if not player or not player.deco then return end
 
-  -- Synchronize canvas with current player.deco state
   decal_baker.sync()
 
   local cam_x = player.screenx or 0
@@ -163,29 +161,37 @@ end
 function decal_baker.clean_excess()
   if not player or not player.deco then return end
   local max_decals = (player.option_maxDecals or 3) * 1000
+
   if #player.deco > max_decals then
     local excess = #player.deco - max_decals
     local removed = 0
-    local i = 1
-    while i <= #player.deco and removed < excess do
+    
+    -- Iterate BACKWARDS like vanilla broomerButton so we don't skew active indices
+    for i = #player.deco, 1, -1 do
       local d = player.deco[i]
-      if d and d.imunity ~= 1 and not PROTECTED_DECO_NAMES[d.name] then
-        if deleteRelatedCover and d.cheeseID then
+      if not is_immune(d) then
+        -- Only delete cover if cheeseID actually exists!
+        if d.cheeseID and deleteRelatedCover then
           deleteRelatedCover(d.cheeseID)
         end
         table.remove(player.deco, i)
         removed = removed + 1
-      else
-        i = i + 1
+        if removed >= excess then
+          break
+        end
       end
     end
+
     if removed > 0 then
+      decal_baker.force_rebake()
       decal_baker.sync()
     end
   end
 end
 
+-- Call this when the player clicks the broom
 function decal_baker.on_broom_cleaned()
+  decal_baker.force_rebake()
   decal_baker.sync()
 end
 
@@ -202,7 +208,20 @@ function decal_baker.init()
   last_deco_table = nil
   last_deco_count = 0
   dim_cache = {}
-  print("[GCore] Decal Baker initialized (Chunked Canvas Rendering & Auto-Trimming)")
+  needs_full_rebake = true
+
+  -- Hook broomerButton so the canvas refreshes immediately when clicked
+  if broomerButton and not broomer_hooked then
+    local orig_broomerButton = broomerButton
+    broomerButton = function(...)
+      local res = orig_broomerButton(...)
+      decal_baker.on_broom_cleaned()
+      return res
+    end
+    broomer_hooked = true
+  end
+
+  print("[GCore] Decal Baker initialized")
 end
 
 return decal_baker
