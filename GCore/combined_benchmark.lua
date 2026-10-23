@@ -5,7 +5,7 @@
 function runContinuousBenchmark(durationSeconds, particleCount, decalCount, losCount, vanillaLosFunc)
   durationSeconds = durationSeconds or 15.0 -- Sustained duration per phase (seconds)
   particleCount = particleCount or 20000
-  decalCount = decalCount or 20000
+  decalCount = decalCount or 1000000
   losCount = losCount or 20000
   vanillaLosFunc = vanillaLosFunc or _G.vanilla_los or _G.los
 
