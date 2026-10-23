@@ -1,0 +1,65 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build Files
+        run: |
+          echo "Building updated files..."
+
+      - name: Fetch un-updated assets from previous releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FILES=(
+            "GConsole.zip"
+            "GCore.zip"
+            "GDumper.zip"
+            "GMenu.zip"
+            "GSpecialEvents.zip"
+            "TacticalOverhaul.zip"
+          )
+
+          PAST_TAGS=$(gh release list --limit 20 --json tagName -q '.[].tagName')
+
+          for file in "${FILES[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✓ $file was updated in this build."
+            else
+              echo "Searching past releases for $file..."
+              FOUND=false
+              for tag in $PAST_TAGS; do
+                if gh release download "$tag" -p "$file" 2>/dev/null; then
+                  echo "  -> Found and carried forward $file from release $tag"
+                  FOUND=true
+                  break
+                fi
+              done
+
+              if [ "$FOUND" = false ]; then
+                echo "::warning ::$file was not found in past releases or current build!"
+              fi
+            fi
+          done
+
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" *.zip \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
