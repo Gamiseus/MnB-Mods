@@ -41,14 +41,14 @@ local function get_or_create_chunk(col)
 end
 
 function decal_baker.clear_all()
+  local prev_canvas = love.graphics.getCanvas()
   for col, c in pairs(chunks) do
     if c then
-      local prev_canvas = love.graphics.getCanvas()
       love.graphics.setCanvas(c)
       love.graphics.clear(0, 0, 0, 0)
-      love.graphics.setCanvas(prev_canvas)
     end
   end
+  love.graphics.setCanvas(prev_canvas)
   last_deco_count = 0
 end
 
@@ -82,6 +82,12 @@ local function stamp_range(decal_list, start_idx, end_idx)
 
   local prev_canvas = love.graphics.getCanvas()
   local prev_blend, prev_alpha = love.graphics.getBlendMode()
+  local prev_r, prev_g, prev_b, prev_a = love.graphics.getColor()
+
+  -- CRUCIAL: Push the graphics stack and reset to origin so camera
+  -- translations/scaling never leak onto the canvas.
+  love.graphics.push()
+  love.graphics.origin()
   love.graphics.setColor(1, 1, 1, 1)
 
   for col, items in pairs(batches) do
@@ -100,7 +106,9 @@ local function stamp_range(decal_list, start_idx, end_idx)
   end
 
   love.graphics.setCanvas(prev_canvas)
+  love.graphics.pop() -- Restore the previous camera transform
   love.graphics.setBlendMode(prev_blend, prev_alpha)
+  love.graphics.setColor(prev_r, prev_g, prev_b, prev_a)
 end
 
 function decal_baker.force_rebake()
@@ -145,17 +153,25 @@ function decal_baker.draw()
   local col_max = math.floor((cam_x + 1380) / CHUNK_WIDTH)
 
   local prev_blend, prev_alpha = love.graphics.getBlendMode()
+  local prev_r, prev_g, prev_b, prev_a = love.graphics.getColor()
   love.graphics.setBlendMode("alpha", "premultiplied")
   love.graphics.setColor(1, 1, 1, 1)
+
+  -- Check if the engine has already translated the coordinate space.
+  -- If (0, 0) transforms to (0, 0), the engine draws in screen coordinates,
+  -- so we manually offset by cam_x. If it translates, draw at world x.
+  local tx, _ = love.graphics.transformPoint(0, 0)
+  local draw_offset_x = (math.abs(tx) < 0.001) and -cam_x or 0
 
   for col = col_min, col_max do
     local c = chunks[col]
     if c then
-      love.graphics.draw(c, col * CHUNK_WIDTH, 0)
+      love.graphics.draw(c, (col * CHUNK_WIDTH) + draw_offset_x, 0)
     end
   end
 
   love.graphics.setBlendMode(prev_blend, prev_alpha)
+  love.graphics.setColor(prev_r, prev_g, prev_b, prev_a)
 end
 
 function decal_baker.clean_excess()
@@ -166,14 +182,9 @@ function decal_baker.clean_excess()
     local excess = #player.deco - max_decals
     local removed = 0
     
-    -- Iterate BACKWARDS like vanilla broomerButton so we don't skew active indices
     for i = #player.deco, 1, -1 do
       local d = player.deco[i]
       if not is_immune(d) then
-        -- Only delete cover if cheeseID actually exists!
-        if d.cheeseID and deleteRelatedCover then
-          deleteRelatedCover(d.cheeseID)
-        end
         table.remove(player.deco, i)
         removed = removed + 1
         if removed >= excess then

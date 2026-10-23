@@ -444,8 +444,8 @@ local scratchBuildingSeen = {}
 -- Drop-in Replacement for los(x1, x2, y1, y2)
 -- Parameter order is (x1, x2, y1, y2) to match urb_engine.lua:3860!
 -- ----------------------------------------------------------------------------
-function los_physics.checkLOS(x1, x2, y1, y2)
-  if not (x1 and x2 and y1 and y2) then return false end
+function los_physics.checkLOS(x1, y1, x2, y2)
+  if not (x1 and y1 and x2 and y2) then return false end
 
   local dx = x2 - x1
   local dy = y2 - y1

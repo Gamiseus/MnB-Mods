@@ -2,7 +2,7 @@
 version = "1.0.0"
 priority = 100
 
-# 1. Provide safe serializer module
+# Provide safe serializer module
 [[patches]]
 [patches.module]
 source = "ser.lua"
@@ -16,26 +16,12 @@ source = "los_physics.lua"
 before = "main.lua"
 name = "includes/los_physics"
 
-# 2b. Provide Display Scaling module - still under construction, not 100% functional or ready yet
-[[patches]]
-[patches.module]
-source = "display_scale.lua"
-before = "main.lua"
-name = "includes/display_scale"
-
 # 2c. Provide Log Monitor module
 [[patches]]
 [patches.module]
 source = "log_monitor.lua"
 before = "main.lua"
 name = "includes/log_monitor"
-
-# 2d. Provide Campaign Guard module
-[[patches]]
-[patches.module]
-source = "campaign_guard.lua"
-before = "main.lua"
-name = "includes/campaign_guard"
 
 # 2e. Provide Decal Baker module
 [[patches]]
@@ -44,7 +30,7 @@ source = "decal_baker.lua"
 before = "main.lua"
 name = "includes/decal_baker"
 
-# 3. Enable physics module in conf.lua
+# 3. Enable physics module in conf.lua (required by los_physics)
 [[patches]]
 [patches.pattern]
 target = "conf.lua"
@@ -53,7 +39,7 @@ position = "at"
 payload = "t.modules.physics = true           -- Enable the physics module (boolean)"
 match_indent = true
 
-# 4. Enable thread module in conf.lua
+# 4. Enable thread module in conf.lua (required by log_monitor)
 [[patches]]
 [patches.pattern]
 target = "conf.lua"
@@ -62,34 +48,7 @@ position = "at"
 payload = "t.modules.thread = true            -- Enable the thread module (boolean)"
 match_indent = true
 
-# 4b. Make window resizable in conf.lua
-[[patches]]
-[patches.pattern]
-target = "conf.lua"
-pattern = "t.window.resizable = false         -- Let the window be user-resizable (boolean)"
-position = "at"
-payload = "t.window.resizable = true          -- Let the window be user-resizable (boolean)"
-match_indent = true
-
-# 4c. Enable standard window borders in conf.lua
-[[patches]]
-[patches.pattern]
-target = "conf.lua"
-pattern = "t.window.borderless = true        -- Remove all border visuals from the window (boolean)"
-position = "at"
-payload = "t.window.borderless = false       -- Remove all border visuals from the window (boolean)"
-match_indent = true
-
-# 4d. Use desktop fullscreen type in conf.lua
-[[patches]]
-[patches.pattern]
-target = "conf.lua"
-pattern = 't.window.fullscreentype = "exclusive" -- Standard fullscreen or desktop fullscreen mode (string)'
-position = "at"
-payload = 't.window.fullscreentype = "desktop"   -- Standard fullscreen or desktop fullscreen mode (string)'
-match_indent = true
-
-# 5. Require los_physics and display_scale in main.lua
+# 5. Require los_physics, log_monitor, and decal_baker in main.lua
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -97,33 +56,20 @@ pattern = 'require "includes/directives"'
 position = "after"
 payload = '''
 los_physics = require "includes/los_physics"
-display_scale = require "includes/display_scale"
 log_monitor = require "includes/log_monitor"
-campaign_guard = require "includes/campaign_guard"
 decal_baker = require "includes/decal_baker"
 '''
 match_indent = true
 
-# 5b. Make initial window setMode resizable and bordered
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = "love.window.setMode(1280, 720, {resizable=false, vsync=true, borderless = true})"
-position = "at"
-payload = "love.window.setMode(1280, 720, {resizable=true, vsync=true, borderless = false, minwidth=1280, minheight=720})"
-match_indent = true
-
-# 6. Initialize los_physics and display_scale in love.load
+# 6. Initialize modules in love.load
 [[patches]]
 [patches.pattern]
 target = "main.lua"
 pattern = "function love.load()"
 position = "after"
 payload = '''
-  if display_scale then display_scale.init() end
   if los_physics then los_physics.init() end
   if log_monitor then log_monitor.init() end
-  if campaign_guard then campaign_guard.ensureValidSquad() end
   if decal_baker then decal_baker.init() end
 '''
 match_indent = true
@@ -138,63 +84,6 @@ payload = '''
         if los_physics then los_physics.updateFrame() end
         if log_monitor then log_monitor.update(dt) end
         if decal_baker then decal_baker.update(dt) end
-'''
-match_indent = true
-
-# 8. Safe load saveMNB3.lua in main.lua
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = "player = love.filesystem.load('saveMNB3.lua')()"
-position = "at"
-payload = '''
-    player = (safeLoadProfile and safeLoadProfile('saveMNB3.lua')) or love.filesystem.load('saveMNB3.lua')()
-    if not player and love.filesystem.getInfo('backUp.lua') then
-      print("[SafeLoad] saveMNB3 unreadable, falling back to backUp.lua")
-      player = (safeLoadProfile and safeLoadProfile('backUp.lua')) or player
-    end
-'''
-match_indent = true
-
-# 9. Inject safeLoadProfile function into urb_engine.lua
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = "function distanceCheck(myX, myY, yourX, yourY)"
-position = "before"
-payload = '''
-function safeLoadProfile(filename)
-  if not love or not love.filesystem then
-    local f = io.open(filename, "r")
-    if not f then return nil end
-    local src = f:read("*a")
-    f:close()
-    local chunk, err = (loadstring or load)(src)
-    if not chunk then
-      print("[SafeLoad] Syntax error in " .. tostring(filename) .. ": " .. tostring(err))
-      return nil
-    end
-    local ok, res = pcall(chunk)
-    if not ok or type(res) ~= "table" then
-      print("[SafeLoad] Exec error in " .. tostring(filename) .. ": " .. tostring(res))
-      return nil
-    end
-    return res
-  end
-
-  if not love.filesystem.getInfo(filename) then return nil end
-  local chunk, err = love.filesystem.load(filename)
-  if not chunk then
-    print("[SafeLoad] Failed to compile " .. tostring(filename) .. ": " .. tostring(err))
-    return nil
-  end
-  local ok, res = pcall(chunk)
-  if not ok or type(res) ~= "table" then
-    print("[SafeLoad] Failed to execute " .. tostring(filename) .. ": " .. tostring(res))
-    return nil
-  end
-  return res
-end
 '''
 match_indent = true
 
@@ -234,45 +123,6 @@ function vanilla_los2(shooter, target)
 '''
 match_indent = true
 
-# 12. Fix inverted los arguments in flank enemy check
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = "if los(rx, ry, foes[j].x, foes[j].y) then blocked = false; break end"
-position = "at"
-payload = "if los(rx, foes[j].x, ry, foes[j].y) then blocked = false; break end"
-match_indent = true
-
-# 13. Wrap paraChallengeButton saveMNB2 load
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = "player2 = love.filesystem.load('saveMNB2.lua')()"
-position = "at"
-payload = '''
-    player2 = safeLoadProfile('saveMNB2.lua') or {}
-    if not player2.mnb2Experience and love.filesystem.getInfo('backUp.lua') then
-      player2 = safeLoadProfile('backUp.lua') or player2
-    end
-'''
-match_indent = true
-
-# 14. Wrap menu_classicButton saveMNB2 load
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = "player = love.filesystem.load('saveMNB2.lua')()"
-position = "at"
-payload = '''
-    local loadedMnb2 = safeLoadProfile('saveMNB2.lua')
-    if not loadedMnb2 and love.filesystem.getInfo('backUp.lua') then
-      print("[SafeLoad] saveMNB2 unreadable, falling back to backUp.lua")
-      loadedMnb2 = safeLoadProfile('backUp.lua')
-    end
-    player = loadedMnb2 or player
-'''
-match_indent = true
-
 # 15. Draw physics LOS debug overlay in drawFiles.lua
 [[patches]]
 [patches.pattern]
@@ -286,7 +136,7 @@ payload = '''
 '''
 match_indent = true
 
-# 16. Keybind for dedicated F10 LOS overlay toggle and F11/Alt+Enter fullscreen
+# 16. Keybind for dedicated F10 LOS overlay toggle
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -309,752 +159,8 @@ payload = '''
       if sfx then local cl = sfx:clone(); cl:play() end
     end
   end
-  if key == "f11" or (key == "return" and (love.keyboard.isDown("lalt") or love.keyboard.isDown("ralt"))) then
-    if display_scale then
-      display_scale.toggleFullscreen()
-    end
-  end
 '''
 match_indent = true
-
-# 17. Display scale beginDraw at start of love.draw
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = "function love.draw()"
-position = "after"
-payload = '''
-  if display_scale then display_scale.beginDraw() end
-'''
-match_indent = true
-
-# 18. Display scale endDraw at end of love.draw
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = '''
-  if(player.gameState == 0) then 
-    drawState0(dt)
-  else
-    drawState1(dt)
-  end
-'''
-position = "after"
-payload = '''
-  if display_scale then display_scale.endDraw() end
-'''
-match_indent = true
-
-# 19. Fix vanilla crash in drawFiles.lua menuPage 10 (MVP/stats when tempMVPEyes is 0 or invalid)
-[[patches]]
-[patches.pattern]
-target = "includes/drawFiles.lua"
-pattern = '''
-    -- trench or very early games can mess things up if no VIP
-    if("face_eyes"..tempMVPEyes ~= nil and "face_eyes"..tempMVPEyes ~= 0) then
-      love.graphics.draw( faceBase, 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2)
-      love.graphics.draw(_G["face_eyes"..tempMVPEyes], 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2)
-      love.graphics.draw(_G["face_nose"..tempMVPNose], 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2)
-      love.graphics.draw(_G["face_hair"..tempMVPHair], 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2)
-      love.graphics.draw(_G["face_mouth"..tempMVPMouth], 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2)
-      if(tempMVPSpec ~= "") then
-        love.graphics.draw(_G["spec_"..tempMVPSpec], 225, 490, 0, 0.7, 0.7, _G["spec_"..tempMVPSpec]:getWidth( )/2, _G["spec_"..tempMVPSpec]:getHeight( )/2)
-      end
-    end
-'''
-position = "at"
-payload = '''
-    -- trench or very early games can mess things up if no VIP (safely guard all face sprites)
-    if tempMVPEyes and tempMVPEyes ~= 0 and _G["face_eyes"..tempMVPEyes] then
-      if faceBase then love.graphics.draw( faceBase, 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2) end
-      if _G["face_eyes"..tempMVPEyes] then love.graphics.draw(_G["face_eyes"..tempMVPEyes], 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2) end
-      if tempMVPNose and _G["face_nose"..tempMVPNose] then love.graphics.draw(_G["face_nose"..tempMVPNose], 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2) end
-      if tempMVPHair and _G["face_hair"..tempMVPHair] then love.graphics.draw(_G["face_hair"..tempMVPHair], 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2) end
-      if tempMVPMouth and _G["face_mouth"..tempMVPMouth] then love.graphics.draw(_G["face_mouth"..tempMVPMouth], 173, 445, 0, 1.5, 1.5, faceBase:getWidth( )/2, faceBase:getHeight( )/2) end
-      if tempMVPSpec and tempMVPSpec ~= "" and tempMVPSpec ~= 0 and _G["spec_"..tempMVPSpec] then
-        local specImg = _G["spec_"..tempMVPSpec]
-        love.graphics.draw(specImg, 225, 490, 0, 0.7, 0.7, specImg:getWidth( )/2, specImg:getHeight( )/2)
-      end
-    end
-'''
-match_indent = true
-
-# 20. Initialize face_eyes0 fallback in main.lua to prevent nil drawable crashes
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = '''
-  for z=1, 10, 1 do
-    _G["face_eyes"..z] = love.graphics.newImage("sprites/face_eyes"..z..".png")
-  end
-'''
-position = "after"
-payload = '''
-  face_eyes0 = face_eyes1
-'''
-match_indent = true
-
-
-
-
-# 21. urb_engine.lua: Prevent resuming into empty/corrupted match with 0 deployed troops
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-  if(player.gameType == 1) then 
-    print("gametype 1 detected")
-    if(player.ui_gameStarted == 0 ) then 
-'''
-position = "at"
-payload = '''
-  if(player.gameType == 1) then 
-    print("gametype 1 detected")
-    -- GCore safeguard: prevent resuming into empty/corrupted match
-    if player.ui_gameStarted == 1 and (not player.deployedTroops or #player.deployedTroops == 0 or (mnb2SquadSize and mnb2SquadSize() <= 0)) then
-      print("[GCore] Clearing stale ui_gameStarted with 0 deployed troops to prevent defeat loop")
-      player.ui_gameStarted = 0
-    end
-    if(player.ui_gameStarted == 0 ) then 
-'''
-match_indent = true
-
-# 22. urb_engine.lua: Replace pause_optionButton to preserve active match in memory
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-function pause_optionButton()
-  local clone_sfx1
-  clone_sfx1 = _G["weaponInspect"..randNbr(5)]:clone()
-  clone_sfx1:play() 
-
-  --print("pause option started")
-  local serialize = require 'includes/ser'
-  --save the state
-  if(player.gameType == 0) then 
-    love.filesystem.write('saveMNB3.lua', serialize(player))
-    love.filesystem.write('backUp.lua', serialize(player))
-  else
-    love.filesystem.write('saveMNB2.lua', serialize(player))
-    storeRibs()
-  end
-  --load profile
-  if love.filesystem.getInfo('saveMNB3.lua' ) then
-    player = love.filesystem.load('saveMNB3.lua')()
-    --print("loading mnb3 Save")
-  else
-    --print("creating then loading mnb3 profile")
-    player = {}
-    newProfile(player)
-    love.filesystem.write('saveMNB3.lua', serialize(player))
-  end
-  saveRibs()
-  -- stop all sounds 
-  love.audio.stop( )
-  --
-  player.gameState = 1
-  player.loneGuy = 0
-  logoFade = 0
-  textFade = 0
-  logoFadeLoaded = 1
-  bgFade = 101
-  uiFade = 255
-  dateFade = 120
- -- print("pause_optionButton is calling menupage = 8")
-  menuPage = 8
-  mouseOverText = ""
-  contextualText = ""
-end
-'''
-position = "at"
-payload = '''
-function pause_optionButton()
-  local clone_sfx1
-  clone_sfx1 = _G["weaponInspect"..randNbr(5)]:clone()
-  clone_sfx1:play() 
-
-  -- GCore: Track in-game pause origin so Back returns to pause screen
-  _G.optionsOpenedFromPause = true
-  _G.optionsPauseSavedPlayer = player
-
-  player.gameState = 1
-  player.loneGuy = 0
-  logoFade = 0
-  textFade = 0
-  logoFadeLoaded = 1
-  bgFade = 101
-  uiFade = 255
-  dateFade = 120
-  menuPage = 8
-  mouseOverText = ""
-  contextualText = ""
-end
-'''
-match_indent = true
-
-# 23. urb_engine.lua: Fix menu_backButton to return to pause screen from options and sub-options
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-  local serialize = require 'includes/ser'
-  tellLearn = 0
-'''
-position = "after"
-payload = '''
-  if menuPage == 16 or menuPage == 12 then
-    menuPage = 8
-    mouseOverText = ""
-    contextualText = ""
-    return
-  end
-  if menuPage == 8 then
-    if _G.optionsOpenedFromPause then
-      -- Synchronize modified options to disk so settings persist
-      if safeLoadProfile then
-        local p3 = safeLoadProfile('saveMNB3.lua')
-        if p3 then
-          p3.option_volume = player.option_volume
-          p3.option_music = player.option_music
-          p3.option_fps = player.option_fps
-          p3.option_fullScreen = player.option_fullScreen
-          p3.option_maxParticles = player.option_maxParticles
-          p3.option_maxDecals = player.option_maxDecals
-          p3.option_floatyText = player.option_floatyText
-          p3.option_textCues = player.option_textCues
-          p3.scrollSpeed = player.scrollSpeed
-          p3.borderLess = player.borderLess
-          p3.muzzleFlash = player.muzzleFlash
-          love.filesystem.write('saveMNB3.lua', serialize(p3))
-        end
-        if player.gameType == 1 then
-          local p2 = safeLoadProfile('saveMNB2.lua')
-          if p2 then
-            p2.option_volume = player.option_volume
-            p2.option_music = player.option_music
-            p2.option_fps = player.option_fps
-            p2.option_fullScreen = player.option_fullScreen
-            p2.option_maxParticles = player.option_maxParticles
-            p2.option_maxDecals = player.option_maxDecals
-            p2.option_floatyText = player.option_floatyText
-            p2.option_textCues = player.option_textCues
-            p2.scrollSpeed = player.scrollSpeed
-            love.filesystem.write('saveMNB2.lua', serialize(p2))
-          end
-        end
-      end
-      -- Return cleanly to active paused game
-      player.gameState = 0
-      menuPage = 0
-      pause = 1
-      _G.optionsOpenedFromPause = false
-      _G.optionsPauseSavedPlayer = nil
-      mouseOverText = ""
-      contextualText = ""
-      return
-    else
-      menuPage = 1
-      mouseOverText = ""
-      contextualText = ""
-      return
-    end
-  end
-'''
-match_indent = true
-# 24. drawFiles.lua: Suppress per-frame Drawing specialEvent log spam
-[[patches]]
-[patches.pattern]
-target = "includes/drawFiles.lua"
-pattern = '''
-      love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
-      print("Drawing specialEvent_"..specialEvent)
-      love.graphics.draw(_G["specialEvent_"..specialEvent], 115, 210)
-'''
-position = "at"
-payload = '''
-      love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
-      -- GCore: Removed per-frame debug print to prevent log spam
-      love.graphics.draw(_G["specialEvent_"..specialEvent], 115, 210)
-'''
-match_indent = true
-
-# 25. drawFiles.lua: Suppress per-frame bcModBlind print in briefing screen
-[[patches]]
-[patches.pattern]
-target = "includes/drawFiles.lua"
-pattern = '''
-      local temp = player.bc[conditionSelection].id
-      print(player.bcModBlind)
-      if(player.bcModBlind < 1) then
-'''
-position = "at"
-payload = '''
-      local temp = player.bc[conditionSelection].id
-      -- GCore: Removed per-frame debug print to prevent log spam
-      if(player.bcModBlind < 1) then
-'''
-match_indent = true
-
-# 26. drawFiles.lua: Squad panel null-safety checks for slots 1..6 and soldierHighLight
-[[patches]]
-[patches.pattern]
-target = "includes/drawFiles.lua"
-pattern = '''
-    love.graphics.setFont(nonoFont)
-    if(soldierHighLight == 1) then
-      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    end
-    love.graphics.draw(faceBase, 75, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_eyes"..player.deployedTroops[1].eyes], 75, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_nose"..player.deployedTroops[1].nose], 75, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_mouth"..player.deployedTroops[1].mouth], 75, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_hair"..player.deployedTroops[1].hair], 75+3, 210, 0, 2, 2)
-    if(player.deployedTroops[1].dead == 1) then
-      love.graphics.draw(kiaMask, 75, 210, 0, 2, 2)
-    end
-    -- name change
-    if(changeName == 1) then
-      love.graphics.setColor( love.math.colorFromBytes(0, 0, 0, 255))
-      love.graphics.rectangle( "fill", 50, 340, 200, 50)
-    elseif(changeName == 2) then
-      love.graphics.setColor(love.math.colorFromBytes( 0, 0, 0, 255))
-      love.graphics.rectangle( "fill", 50, 585, 200, 50)
-    elseif(changeName == 3) then
-      love.graphics.setColor( love.math.colorFromBytes(0, 0, 0, 255))
-      love.graphics.rectangle( "fill", 275, 340, 200, 50)
-    elseif(changeName == 4) then
-      love.graphics.setColor( love.math.colorFromBytes(0, 0, 0, 255))
-      love.graphics.rectangle( "fill", 275, 585, 200, 50)
-    elseif(changeName == 5) then
-      love.graphics.setColor( love.math.colorFromBytes(0, 0, 0, 255))
-      love.graphics.rectangle( "fill", 500, 340, 200, 50)
-    elseif(changeName == 6) then
-      love.graphics.setColor( love.math.colorFromBytes(0, 0, 0, 255))
-      love.graphics.rectangle( "fill", 500, 585, 200, 50)
-    end
-    
-    love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    love.graphics.setFont(bigFont)
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[1].name}, 50-1, 355, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[1].name}, 50+1, 355, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[1].name}, 50, 355-1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[1].name}, 50, 355+1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(255,255,255,uiFade)}, player.deployedTroops[1].name}, 50, 355, 200, "center")
-    love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
-    
-    if(soldierHighLight == 2) then
-      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    end
-    love.graphics.draw(faceBase, 75, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_eyes"..player.deployedTroops[2].eyes], 75, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_nose"..player.deployedTroops[2].nose], 75, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_mouth"..player.deployedTroops[2].mouth], 75, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_hair"..player.deployedTroops[2].hair], 75+3, 455, 0, 2, 2)
-    if(player.deployedTroops[2].dead == 1) then
-      love.graphics.draw(kiaMask, 75, 455, 0, 2, 2)
-    end
-    love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[2].name}, 50-1, 600, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[2].name}, 50+1, 600, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[2].name}, 50, 600-1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[2].name}, 50, 600+1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(255,255,255,uiFade)}, player.deployedTroops[2].name}, 50, 600, 200, "center")
-    love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
-    
-    if(soldierHighLight == 3) then
-      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    end
-    love.graphics.draw(faceBase, 300, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_eyes"..player.deployedTroops[3].eyes], 300, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_nose"..player.deployedTroops[3].nose], 300, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_mouth"..player.deployedTroops[3].mouth], 300, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_hair"..player.deployedTroops[3].hair], 300+3, 210, 0, 2, 2)
-    if(player.deployedTroops[3].dead == 1) then
-      love.graphics.draw(kiaMask, 300, 210, 0, 2, 2)
-    end
-    love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[3].name}, 275-1, 355, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[3].name}, 275+1, 355, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[3].name}, 275, 355-1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[3].name}, 275, 355+1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(255,255,255,uiFade)}, player.deployedTroops[3].name}, 275, 355, 200, "center")
-    love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
-    
-    if(soldierHighLight == 4) then
-      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    end
-    love.graphics.draw(faceBase, 300, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_eyes"..player.deployedTroops[4].eyes], 300, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_nose"..player.deployedTroops[4].nose], 300, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_mouth"..player.deployedTroops[4].mouth], 300, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_hair"..player.deployedTroops[4].hair], 300+3, 455, 0, 2, 2)
-    if(player.deployedTroops[4].dead == 1) then
-      love.graphics.draw(kiaMask, 300, 455, 0, 2, 2)
-    end
-    love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[4].name}, 275-1, 600, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[4].name}, 275+1, 600, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[4].name}, 275, 600-1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[4].name}, 275, 600+1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(255,255,255,uiFade)}, player.deployedTroops[4].name}, 275, 600, 200, "center")
-    love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
-    
-    if(soldierHighLight == 5) then
-      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    end
-    love.graphics.draw(faceBase, 525, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_eyes"..player.deployedTroops[5].eyes], 525, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_nose"..player.deployedTroops[5].nose], 525, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_mouth"..player.deployedTroops[5].mouth], 525, 210, 0, 2, 2)
-    love.graphics.draw( _G["face_hair"..player.deployedTroops[5].hair], 525+3, 210, 0, 2, 2)
-    if(player.deployedTroops[5].dead == 1) then
-      love.graphics.draw(kiaMask, 525, 210, 0, 2, 2)
-    end
-    love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[5].name}, 500-1, 355, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[5].name}, 500+1, 355, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[5].name}, 500, 355-1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[5].name}, 500, 355+1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(255,255,255,uiFade)}, player.deployedTroops[5].name}, 500, 355, 200, "center")
-    love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
-    
-    if(soldierHighLight == 6) then
-      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    end
-    love.graphics.draw(faceBase, 525, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_eyes"..player.deployedTroops[6].eyes], 525, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_nose"..player.deployedTroops[6].nose], 525, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_mouth"..player.deployedTroops[6].mouth], 525, 455, 0, 2, 2)
-    love.graphics.draw( _G["face_hair"..player.deployedTroops[6].hair], 525+3, 455, 0, 2, 2)
-    if(player.deployedTroops[6].dead == 1) then
-      love.graphics.draw(kiaMask, 525, 455, 0, 2, 2)
-    end
-    love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[6].name}, 500-1, 600, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[6].name}, 500+1, 600, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[6].name}, 500, 600-1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, player.deployedTroops[6].name}, 500, 600+1, 200, "center")
-    love.graphics.printf({{love.math.colorFromBytes(255,255,255,uiFade)}, player.deployedTroops[6].name}, 500, 600, 200, "center")
-    love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
-    --if a soldier is highlighted we display his stats
-    if(soldierHighLight > 0) then
-'''
-position = "at"
-payload = '''
-    love.graphics.setFont(nonoFont)
-    -- GCore Null-Safe Squad Panel Slots 1..6
-    local squadSlots = {
-      { idx = 1, faceX = 75, faceY = 210, textX = 50, textY = 355, rectX = 50, rectY = 340 },
-      { idx = 2, faceX = 75, faceY = 455, textX = 50, textY = 600, rectX = 50, rectY = 585 },
-      { idx = 3, faceX = 300, faceY = 210, textX = 275, textY = 355, rectX = 275, rectY = 340 },
-      { idx = 4, faceX = 300, faceY = 455, textX = 275, textY = 600, rectX = 275, rectY = 585 },
-      { idx = 5, faceX = 525, faceY = 210, textX = 500, textY = 355, rectX = 500, rectY = 340 },
-      { idx = 6, faceX = 525, faceY = 455, textX = 500, textY = 600, rectX = 500, rectY = 585 },
-    }
-    for _, slt in ipairs(squadSlots) do
-      local sUnit = player.deployedTroops and player.deployedTroops[slt.idx]
-      if sUnit ~= nil then
-        if(soldierHighLight == slt.idx) then
-          love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-        end
-        love.graphics.draw(faceBase, slt.faceX, slt.faceY, 0, 2, 2)
-        if sUnit.eyes then love.graphics.draw( _G["face_eyes"..sUnit.eyes], slt.faceX, slt.faceY, 0, 2, 2) end
-        if sUnit.nose then love.graphics.draw( _G["face_nose"..sUnit.nose], slt.faceX, slt.faceY, 0, 2, 2) end
-        if sUnit.mouth then love.graphics.draw( _G["face_mouth"..sUnit.mouth], slt.faceX, slt.faceY, 0, 2, 2) end
-        if sUnit.hair then love.graphics.draw( _G["face_hair"..sUnit.hair], slt.faceX+3, slt.faceY, 0, 2, 2) end
-        if(sUnit.dead == 1) then
-          love.graphics.draw(kiaMask, slt.faceX, slt.faceY, 0, 2, 2)
-        end
-        if(changeName == slt.idx) then
-          love.graphics.setColor( love.math.colorFromBytes(0, 0, 0, 255))
-          love.graphics.rectangle( "fill", slt.rectX, slt.rectY, 200, 50)
-        end
-        love.graphics.setColor( love.math.colorFromBytes(255, 255, 255))
-        love.graphics.setFont(bigFont)
-        love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, sUnit.name or ""}, slt.textX-1, slt.textY, 200, "center")
-        love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, sUnit.name or ""}, slt.textX+1, slt.textY, 200, "center")
-        love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, sUnit.name or ""}, slt.textX, slt.textY-1, 200, "center")
-        love.graphics.printf({{love.math.colorFromBytes(0,0,0,uiFade)}, sUnit.name or ""}, slt.textX, slt.textY+1, 200, "center")
-        love.graphics.printf({{love.math.colorFromBytes(255,255,255,uiFade)}, sUnit.name or ""}, slt.textX, slt.textY, 200, "center")
-        love.graphics.setColor( love.math.colorFromBytes(101, 24, 24, uiFade))
-      end
-    end
-    --if a soldier is highlighted we display his stats
-    if(soldierHighLight > 0 and player.deployedTroops and player.deployedTroops[soldierHighLight] ~= nil) then
-'''
-match_indent = true
-
-# 27. urb_engine.lua: Squad panel buttons & highlight null-safety
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-    buttons[#buttons+1] = Button.new(32, 686, 60, 30, "menu_back","active", true, mouseOverBack)
-    --soldier 1
-    buttons[#buttons+1] = Button.new(50, 185, 200, 155, "menu_soldier1","active", true, mouseOverSoldier)
-    buttons[#buttons+1] = Button.new(50, 340, 200, 50, "menu_name1","active", true, mouseOverSoldierName)
-    --soldier 2
-    buttons[#buttons+1] = Button.new(50, 430, 200, 155, "menu_soldier2","active", true, mouseOverSoldier)
-    buttons[#buttons+1] = Button.new(50, 585, 200, 50, "menu_name2","active", true, mouseOverSoldierName)
-    --soldier3
-    buttons[#buttons+1] = Button.new(275, 185, 200, 155, "menu_soldier3","active", true, mouseOverSoldier)
-    buttons[#buttons+1] = Button.new(275, 340, 200, 50, "menu_name3","active", true, mouseOverSoldierName)
-    --soldier4
-    buttons[#buttons+1] = Button.new(275, 430, 200, 155, "menu_soldier4","active", true, mouseOverSoldier)
-    buttons[#buttons+1] = Button.new(275, 585, 200, 50, "menu_name4","active", true, mouseOverSoldierName)
-    --soldier5
-    buttons[#buttons+1] = Button.new(500, 185, 200, 155, "menu_soldier5","active", true, mouseOverSoldier)
-    buttons[#buttons+1] = Button.new(500, 340, 200, 50, "menu_name5","active", true, mouseOverSoldierName)
-    -- soldier6
-    buttons[#buttons+1] = Button.new(500, 430, 200, 155, "menu_soldier6","active", true, mouseOverSoldier)
-    buttons[#buttons+1] = Button.new(500, 585, 200, 50, "menu_name6","active", true, mouseOverSoldierName)
-
-    if(soldierHighLight ~= 0 ) then 
-      --print("soldier highlight is "..soldierHighLight)
-      if(gunDetail == 0 and classDetail == 0) then
-          -- medal button
-          drawAwardButtons(player.deployedTroops[soldierHighLight].awards, 998, 575)
-          -- perk button
-'''
-position = "at"
-payload = '''
-    buttons[#buttons+1] = Button.new(32, 686, 60, 30, "menu_back","active", true, mouseOverBack)
-    -- GCore: Only create buttons for actually deployed soldiers
-    if player.deployedTroops and player.deployedTroops[1] ~= nil then
-      buttons[#buttons+1] = Button.new(50, 185, 200, 155, "menu_soldier1","active", true, mouseOverSoldier)
-      buttons[#buttons+1] = Button.new(50, 340, 200, 50, "menu_name1","active", true, mouseOverSoldierName)
-    end
-    if player.deployedTroops and player.deployedTroops[2] ~= nil then
-      buttons[#buttons+1] = Button.new(50, 430, 200, 155, "menu_soldier2","active", true, mouseOverSoldier)
-      buttons[#buttons+1] = Button.new(50, 585, 200, 50, "menu_name2","active", true, mouseOverSoldierName)
-    end
-    if player.deployedTroops and player.deployedTroops[3] ~= nil then
-      buttons[#buttons+1] = Button.new(275, 185, 200, 155, "menu_soldier3","active", true, mouseOverSoldier)
-      buttons[#buttons+1] = Button.new(275, 340, 200, 50, "menu_name3","active", true, mouseOverSoldierName)
-    end
-    if player.deployedTroops and player.deployedTroops[4] ~= nil then
-      buttons[#buttons+1] = Button.new(275, 430, 200, 155, "menu_soldier4","active", true, mouseOverSoldier)
-      buttons[#buttons+1] = Button.new(275, 585, 200, 50, "menu_name4","active", true, mouseOverSoldierName)
-    end
-    if player.deployedTroops and player.deployedTroops[5] ~= nil then
-      buttons[#buttons+1] = Button.new(500, 185, 200, 155, "menu_soldier5","active", true, mouseOverSoldier)
-      buttons[#buttons+1] = Button.new(500, 340, 200, 50, "menu_name5","active", true, mouseOverSoldierName)
-    end
-    if player.deployedTroops and player.deployedTroops[6] ~= nil then
-      buttons[#buttons+1] = Button.new(500, 430, 200, 155, "menu_soldier6","active", true, mouseOverSoldier)
-      buttons[#buttons+1] = Button.new(500, 585, 200, 50, "menu_name6","active", true, mouseOverSoldierName)
-    end
-
-    if(soldierHighLight ~= 0 and player.deployedTroops and player.deployedTroops[soldierHighLight] ~= nil) then 
-      --print("soldier highlight is "..soldierHighLight)
-      if(gunDetail == 0 and classDetail == 0) then
-          -- medal button
-          drawAwardButtons(player.deployedTroops[soldierHighLight].awards, 998, 575)
-          -- perk button
-'''
-match_indent = true
-
-# 28. drawFiles.lua: Screen boundary clamping for menu tooltips (prevent text overflow)
-[[patches]]
-[patches.pattern]
-target = "includes/drawFiles.lua"
-pattern = '''
-  if(mouseOverText ~= "") then
-    local thisx =  love.mouse.getX()
-    local thisy = love.mouse.getY()
-    love.graphics.setFont(nonoFont)
-    if(menuPage == 3 and thisx > 978) then
-        love.graphics.printf({{love.math.colorFromBytes(255, 255, 255, 255)}, mouseOverText}, 25, 650, 1230, "right")
-    else
-      love.graphics.setColor( love.math.colorFromBytes(0, 0, 0, 255))
-      love.graphics.print(mouseOverText, thisx+19, thisy)
-      love.graphics.print(mouseOverText, thisx+21, thisy)
-      love.graphics.print(mouseOverText, thisx+20, thisy-1)
-      love.graphics.print(mouseOverText, thisx+20, thisy+1)
-      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255, 255))
-      love.graphics.print(mouseOverText, thisx+20, thisy)
-    end
-    love.graphics.setFont(daFont)
-    --nonoSquare(thisx, thisy)
-  end
-'''
-position = "at"
-payload = '''
-  if(mouseOverText ~= "") then
-    local thisx =  love.mouse.getX()
-    local thisy = love.mouse.getY()
-    love.graphics.setFont(nonoFont)
-    if(menuPage == 3 and thisx > 978) then
-        love.graphics.printf({{love.math.colorFromBytes(255, 255, 255, 255)}, mouseOverText}, 25, 650, 1230, "right")
-    else
-      local tw = (nonoFont and nonoFont.getWidth and nonoFont:getWidth(mouseOverText)) or 200
-      local th = (nonoFont and nonoFont.getHeight and nonoFont:getHeight()) or 20
-      local drawX = thisx + 20
-      local drawY = thisy
-      if drawX + tw > 1260 then
-        drawX = math.max(10, thisx - tw - 10)
-      end
-      if drawY + th > 700 then
-        drawY = math.max(10, 700 - th)
-      end
-      love.graphics.setColor( love.math.colorFromBytes(0, 0, 0, 255))
-      love.graphics.print(mouseOverText, drawX-1, drawY)
-      love.graphics.print(mouseOverText, drawX+1, drawY)
-      love.graphics.print(mouseOverText, drawX, drawY-1)
-      love.graphics.print(mouseOverText, drawX, drawY+1)
-      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255, 255))
-      love.graphics.print(mouseOverText, drawX, drawY)
-    end
-    love.graphics.setFont(daFont)
-    --nonoSquare(thisx, thisy)
-  end
-'''
-match_indent = true
-
-
-# 29. main.lua: love.quit sanitize campaign save
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = '''
-function love.quit()
-  if(player.gameType == 0) then 
-    love.filesystem.write('saveMNB3.lua', serialize(player))
-'''
-position = "at"
-payload = '''
-function love.quit()
-  if(player.gameType == 0) then 
-    if campaign_guard then campaign_guard.sanitizeSave() end
-    love.filesystem.write('saveMNB3.lua', serialize(player))
-'''
-match_indent = true
-
-# 30. includes/urb_engine.lua: updateProfile campaign squad check
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-function updateProfile(player)
-  local serialize = require 'includes/ser'
-  print("check for profile updates..")
-'''
-position = "at"
-payload = '''
-function updateProfile(player)
-  local serialize = require 'includes/ser'
-  print("check for profile updates..")
-  if campaign_guard then campaign_guard.ensureValidSquad() end
-'''
-match_indent = true
-
-# 31. includes/urb_engine.lua: menu_campaignButton campaign restore
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-function menu_campaignButton()
-  local clone_sfx1
-  clone_sfx1 = _G["weaponInspect"..randNbr(5)]:clone()
-  clone_sfx1:play() 
-  if(player.dayz >= 333) then 
-'''
-position = "at"
-payload = '''
-function menu_campaignButton()
-  local clone_sfx1
-  clone_sfx1 = _G["weaponInspect"..randNbr(5)]:clone()
-  clone_sfx1:play() 
-  if campaign_guard then campaign_guard.restoreCampaignIfActive() end
-  if(player.dayz >= 333) then 
-'''
-match_indent = true
-
-# 32. includes/urb_engine.lua: menu_squadButton campaign restore
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-function menu_squadButton()
-  local clone_sfx1
-  clone_sfx1 = _G["weaponInspect"..randNbr(5)]:clone()
-  clone_sfx1:play() 
-  menuPage = 3
-'''
-position = "at"
-payload = '''
-function menu_squadButton()
-  local clone_sfx1
-  clone_sfx1 = _G["weaponInspect"..randNbr(5)]:clone()
-  clone_sfx1:play() 
-  if campaign_guard then campaign_guard.restoreCampaignIfActive() end
-  menuPage = 3
-'''
-match_indent = true
-
-# 33. includes/urb_engine.lua: menu_backButton campaign restore on return to menu
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-      if(menuPage == 20) then 
-        player.abilityShop = {}
-      end
-      menuPage = 1
-    end
-'''
-position = "at"
-payload = '''
-      if(menuPage == 20) then 
-        player.abilityShop = {}
-      end
-      menuPage = 1
-      if campaign_guard then campaign_guard.restoreCampaignIfActive() end
-    end
-'''
-match_indent = true
-
-# 35. includes/urb_engine.lua: postMissionAdmin sanitize campaign save
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-  if(player.gameType == 0) then
-  --  print("mnb3 detected so save mnb3")
-    local serialize = require 'includes/ser'
-    love.filesystem.write('saveMNB3.lua', serialize(player))
-    love.filesystem.write('backUp.lua', serialize(player))
-'''
-position = "at"
-payload = '''
-  if(player.gameType == 0) then
-  --  print("mnb3 detected so save mnb3")
-    local serialize = require 'includes/ser'
-    if campaign_guard then campaign_guard.sanitizeSave() end
-    love.filesystem.write('saveMNB3.lua', serialize(player))
-    love.filesystem.write('backUp.lua', serialize(player))
-'''
-match_indent = true
-
-# 36. includes/bcChecks.lua: menu_goButton campaign squad ensure
-[[patches]]
-[patches.pattern]
-target = "includes/bcChecks.lua"
-pattern = '''
-function menu_goButton()
-  print("BC mod night is "..player.bcModNight)
-  if(player.ui_gameStarted == 0 ) then 
-'''
-position = "at"
-payload = '''
-function menu_goButton()
-  print("BC mod night is "..player.bcModNight)
-  if campaign_guard then campaign_guard.ensureValidSquad() end
-  if(player.ui_gameStarted == 0 ) then 
-'''
-match_indent = true
-
 
 # 37. drawFiles.lua: High-performance Decal Canvas rendering
 [[patches]]
@@ -1073,42 +179,6 @@ payload = '''
     for n=1, #player.deco, 1 do
       love.graphics.draw( _G[player.deco[n].name], player.deco[n].x, player.deco[n].y, player.deco[n].rotation, player.deco[n].size/10, player.deco[n].size/10, _G[player.deco[n].name]:getWidth( )/2, _G[player.deco[n].name]:getHeight( )/2)
     end
-  end
-'''
-match_indent = true
-
-# 38. urb_engine.lua: Enable broom cleaner button in Classic mode
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = '''
-    if(player.gameType == 1) then 
-      if(player.broomTimer <= 0) then 
-         buttons[#buttons+1] = Button.new(1230+player.screenx, 50, 50, 50,"broomer","active", true, broomTxt) 
-      end
-'''
-position = "at"
-payload = '''
-    if(player.gameType == 1 or player.gameType == 0) then 
-      if(player.broomTimer <= 0) then 
-         buttons[#buttons+1] = Button.new(1230+player.screenx, 50, 50, 50,"broomer","active", true, broomTxt) 
-      end
-'''
-match_indent = true
-
-# 39. drawFiles.lua: Render broom icon in Classic mode
-[[patches]]
-[patches.pattern]
-target = "includes/drawFiles.lua"
-pattern = '''
-  if(player.broomTimer <= 0 and player.gameType == 1) then
-    love.graphics.draw(broomIcon, 1250+player.screenx, 75, 0, 0.9, 0.9,broomIcon:getWidth( )/2, broomIcon:getHeight( )/2)
-  end
-'''
-position = "at"
-payload = '''
-  if(player.broomTimer <= 0 and (player.gameType == 1 or player.gameType == 0)) then
-    love.graphics.draw(broomIcon, 1250+player.screenx, 75, 0, 0.9, 0.9,broomIcon:getWidth( )/2, broomIcon:getHeight( )/2)
   end
 '''
 match_indent = true
@@ -1174,3 +244,291 @@ function op_decal5Button()
 end
 '''
 match_indent = true
+
+
+# =========================================================================
+# PATHFINDING & THREAD WORKER MODULES
+# =========================================================================
+
+# 1. Register pathfinding and worker thread modules
+[[patches]]
+[patches.module]
+source = "pathfinding.lua"
+before = "main.lua"
+name = "includes/pathfinding"
+
+[[patches]]
+[patches.module]
+source = "pathfinder_thread.lua"
+before = "main.lua"
+name = "includes/pathfinder_thread"
+
+# 2. Main.lua: Require pathfinding module
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+pathfinding = require "includes/pathfinding"
+'''
+match_indent = true
+
+# 3. Main.lua: Initialize thread worker in love.load
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "Steam.init()"
+position = "before"
+payload = "  if pathfinding then pathfinding.initThreadWorker() end"
+match_indent = true
+
+# 4. Main.lua: Update pathfinding async queues in love.update
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = "runTime0(dt)"
+position = "before"
+payload = "        if pathfinding then pathfinding.update(dt) end"
+match_indent = true
+
+# 5. Main.lua: Clear pathfinding destination on Halt order (H key)
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+        player.deployedTroops[i].targetx = player.deployedTroops[i].x
+        player.deployedTroops[i].targety = player.deployedTroops[i].y
+        if(spamTimer <= 0) then 
+'''
+position = "at"
+payload = '''
+        player.deployedTroops[i].targetx = player.deployedTroops[i].x
+        player.deployedTroops[i].targety = player.deployedTroops[i].y
+        player.deployedTroops[i]._pfGoalX = nil
+        player.deployedTroops[i]._savedOrderX = nil
+        player.deployedTroops[i]._savedOrderY = nil
+        if(spamTimer <= 0) then 
+'''
+match_indent = true
+
+# 6. Main.lua: Shift+F9 dedicated toggle for Pathfinding NavGrid overlay
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+  if(key == "f9") then
+    if(showTerrain == 0) then 
+'''
+position = "at"
+payload = '''
+  if(key == "f9") then
+    local shiftDownF = love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")
+    if shiftDownF then
+      if pathfinding then
+        pathfinding.debugOverlay = not pathfinding.debugOverlay
+        local isOn = pathfinding.debugOverlay
+        player.textCue[#player.textCue+1] = {}
+        player.textCue[#player.textCue].name = isOn and "Pathfinding NavGrid ON" or "Pathfinding NavGrid OFF"
+        player.textCue[#player.textCue].x = player.screenx + 600
+        player.textCue[#player.textCue].y = 300
+        player.textCue[#player.textCue].alpha = 255
+        local sfx = isOn and gageUp or gageDown
+        if sfx then local cl = sfx:clone(); cl:play() end
+      end
+    else
+    if(showTerrain == 0) then 
+'''
+match_indent = true
+
+# 7. Main.lua: Close Shift guard for F9
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''
+      showTerrain = 0
+      showLOS = 0
+      local clone_sfx4 
+      clone_sfx4 = gageDown:clone()
+      clone_sfx4:play()
+    end 
+  end
+'''
+position = "at"
+payload = '''
+      showTerrain = 0
+      showLOS = 0
+      local clone_sfx4 
+      clone_sfx4 = gageDown:clone()
+      clone_sfx4:play()
+    end 
+    end
+  end
+'''
+match_indent = true
+
+# 8. AI.lua: Infantry steering and dynamic collision resolution
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = '''
+          if(randNbr(100)<30) then
+           -- -- print("creajusting angle for "..player.deployedTroops[i].name)
+            if(player.deployedTroops[i].targety) then 
+              player.deployedTroops[i].rotation = math.atan2(player.deployedTroops[i].y -(player.deployedTroops[i].targety), player.deployedTroops[i].x-(player.deployedTroops[i].targetx)) + 1.5707
+            else
+              floatyText(player.deployedTroops[i], "debug:Invalid targety detected on this soldier. \n (reassigning)")
+              player.deployedTroops[i].targetx = player.deployedTroops[i].x
+              player.deployedTroops[i].targety = player.deployedTroops[i].y
+            end
+          end
+          player.deployedTroops[i].x = player.deployedTroops[i].x - math.sin(player.deployedTroops[i].rotation) * currentSpeed * dt
+          player.deployedTroops[i].y = player.deployedTroops[i].y + math.cos(player.deployedTroops[i].rotation) * currentSpeed * dt
+'''
+position = "at"
+payload = '''
+          local steerX = player.deployedTroops[i].targetx
+          local steerY = player.deployedTroops[i].targety
+          local snapTurn = false
+          if(pathfinding ~= nil and player.deployedTroops[i].onFire == 0 and (player.landed == nil or player.landed == 1)) then
+            steerX, steerY, snapTurn = pathfinding.getSteeringTarget(player.deployedTroops[i], dt)
+          end
+          if(snapTurn or randNbr(100)<30) then
+           -- -- print("creajusting angle for "..player.deployedTroops[i].name)
+            if(player.deployedTroops[i].targety and steerY and steerX) then 
+              player.deployedTroops[i].rotation = math.atan2(player.deployedTroops[i].y -(steerY), player.deployedTroops[i].x-(steerX)) + 1.5707
+            else
+              floatyText(player.deployedTroops[i], "debug:Invalid targety detected on this soldier. \n (reassigning)")
+              player.deployedTroops[i].targetx = player.deployedTroops[i].x
+              player.deployedTroops[i].targety = player.deployedTroops[i].y
+            end
+          end
+          local prevX = player.deployedTroops[i].x
+          local prevY = player.deployedTroops[i].y
+          local distToGoal = math.sqrt((player.deployedTroops[i].x - player.deployedTroops[i].targetx)^2 + (player.deployedTroops[i].y - player.deployedTroops[i].targety)^2)
+          local step = currentSpeed * dt
+          if (steerX == player.deployedTroops[i].targetx and steerY == player.deployedTroops[i].targety and distToGoal <= (step + 2.5)) then
+            player.deployedTroops[i].x = player.deployedTroops[i].targetx
+            player.deployedTroops[i].y = player.deployedTroops[i].targety
+          else
+            player.deployedTroops[i].x = player.deployedTroops[i].x - math.sin(player.deployedTroops[i].rotation) * step
+            player.deployedTroops[i].y = player.deployedTroops[i].y + math.cos(player.deployedTroops[i].rotation) * step
+          end
+          if(pathfinding ~= nil and player.deployedTroops[i].onFire == 0 and (player.landed == nil or player.landed == 1)) then
+            pathfinding.resolveObstacleCollision(player.deployedTroops[i], prevX, prevY)
+          end
+'''
+match_indent = true
+
+# 9. AI.lua: Vehicle pathfinding steering target
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = "player.deployedVehicles[i].intendedRotation = math.atan2(player.deployedVehicles[i].y -(player.deployedVehicles[i].targety), player.deployedVehicles[i].x-(player.deployedVehicles[i].targetx)) + 1.5707"
+position = "at"
+payload = '''
+          local vSteerX = player.deployedVehicles[i].targetx
+          local vSteerY = player.deployedVehicles[i].targety
+          if(pathfinding ~= nil and player.deployedVehicles[i].sideRoller <= 0) then
+            vSteerX, vSteerY = pathfinding.getSteeringTarget(player.deployedVehicles[i], dt)
+          end
+          player.deployedVehicles[i].intendedRotation = math.atan2(player.deployedVehicles[i].y -(vSteerY), player.deployedVehicles[i].x-(vSteerX)) + 1.5707
+'''
+match_indent = true
+
+# 10. AI.lua: Precise waypoint arrival threshold (tightens from 10px to 2px for smooth node pathing)
+[[patches]]
+[patches.pattern]
+target = "includes/ai.lua"
+pattern = "if(distanceCheck(player.deployedTroops[i].x, player.deployedTroops[i].y, player.deployedTroops[i].targetx, player.deployedTroops[i].targety) >= 10 and player.deployedTroops[i].temporaryStop <= 0) then"
+position = "at"
+payload = "if(distanceCheck(player.deployedTroops[i].x, player.deployedTroops[i].y, player.deployedTroops[i].targetx, player.deployedTroops[i].targety) >= 2 and player.deployedTroops[i].temporaryStop <= 0) then"
+match_indent = true
+
+# 11. urb_engine.lua: Invalidate hazards on mineDetect
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = "checkCue(soldier.x, soldier.y, 33)"
+position = "after"
+payload = '''
+            mine.flagged = 1
+            if pathfinding and pathfinding.invalidateHazards then
+              pathfinding.invalidateHazards()
+            end
+'''
+match_indent = true
+
+# 12. urb_engine.lua: Invalidate hazards on mineDisarm
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+              table.remove(player.mineField, i)
+              if(soldier.faction == "allied") then 
+'''
+position = "at"
+payload = '''
+              table.remove(player.mineField, i)
+              if pathfinding and pathfinding.invalidateHazards then
+                pathfinding.invalidateHazards()
+              end
+              if(soldier.faction == "allied") then 
+'''
+match_indent = true
+
+# 13. urb_engine.lua: Invalidate hazards on mineGrab
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+                applyLoot(soldier, "HEMine")
+                floatyText(mine, mineGrabbedTxt)
+                table.remove(player.mineField, i)
+                local clone_sfx2
+'''
+position = "at"
+payload = '''
+                applyLoot(soldier, "HEMine")
+                floatyText(mine, mineGrabbedTxt)
+                table.remove(player.mineField, i)
+                if pathfinding and pathfinding.invalidateHazards then
+                  pathfinding.invalidateHazards()
+                end
+                local clone_sfx2
+'''
+match_indent = true
+
+# 14. urb_engine.lua: Invalidate hazards on reconReveal
+[[patches]]
+[patches.pattern]
+target = "includes/urb_engine.lua"
+pattern = '''
+  end
+  -- check for hidden loot
+  for ii=1, #player.lootables, 1 do
+'''
+position = "at"
+payload = '''
+  end
+  if cleared == 1 and pathfinding and pathfinding.invalidateHazards then
+    pathfinding.invalidateHazards()
+  end
+  -- check for hidden loot
+  for ii=1, #player.lootables, 1 do
+'''
+match_indent = true
+
+# 15. drawFiles.lua: Debug NavGrid rendering
+[[patches]]
+[patches.pattern]
+target = "includes/drawFiles.lua"
+pattern = "--cues"
+position = "before"
+payload = '''
+  if pathfinding then
+    pathfinding.drawDebug()
+  end
+'''
+match_indent = true
+

@@ -1,51 +1,42 @@
 local pairs, ipairs, tostring, type, concat, dump, floor, format = pairs, ipairs, tostring, type, table.concat, string.dump, math.floor, string.format
 
+-- Pure visual/UI effects that are safe to discard without affecting gameplay or map terrain
 local ALWAYS_TRANSIENT_KEYS = {
 	particles = true,
 	topParticles = true,
 	rainParticles = true,
-	deco = true,
-	delayedAction = true,
 	explosions = true,
-	leaves = true,
-	screenFuzz = true,
-	textCue = true,
 	damageCue = true,
 	bubbleCue = true,
 	tipCue = true,
 	iconCue = true,
 	uiCue = true,
-	fire = true,
-	lootables = true,
-	craters = true,
-	mineCircles = true,
-	waterCircles = true,
+	textCue = true,
+	xpBubble = true,
 	clouds = true,
 	bubbles = true,
-	fluffBalls = true,
-	poppy = true,
-	xpBubble = true
+	fluffBalls = true
 }
 
-local CLASSIC_TRANSIENT_KEYS = {
-	deployedTroops = true,
-	deployedVehicles = true,
-	placeables = true,
-	buildings = true,
-	rocks = true,
-	forest = true,
-	groundType = true,
-	losBlockers = true,
-	noGoZones = true,
-	road = true,
-	roads = true,
-	mineField = true,
-	troopBin = true,
-	bgPatch = true,
-	xmasLights = true,
-	neutrals = true,
-	planes = true
+-- Substrings in deco names that represent combat litter (casings, blood) rather than map cover (dirt, mud, trenches)
+local DECAL_BLOAT_PATTERNS = {
+	"casing",
+	"shell",
+	"blood",
+	"splat",
+	"gore"
 }
+
+local function is_combat_decal(name)
+	if type(name) ~= "string" then return false end
+	local lower = name:lower()
+	for _, pat in ipairs(DECAL_BLOAT_PATTERNS) do
+		if lower:find(pat, 1, true) then
+			return true
+		end
+	end
+	return false
+end
 
 local function getchr(c)
 	return "\\" .. c:byte()
@@ -83,6 +74,7 @@ local kw = {['and'] = true, ['break'] = true, ['do'] = true, ['else'] = true,
 	['local'] = true, ['nil'] = true, ['not'] = true, ['or'] = true,
 	['repeat'] = true, ['return'] = true, ['then'] = true, ['true'] = true,
 	['until'] = true, ['while'] = true}
+
 local function write_key_value_pair(k, v, memo, rev_memo, name)
 	if type(k) == 'string' and k:match '^[_%a][_%w]*$' and not kw[k] then
 		return (name and name .. '.' or '') .. k ..'=' .. write(v, memo, rev_memo)
@@ -91,9 +83,6 @@ local function write_key_value_pair(k, v, memo, rev_memo, name)
 	end
 end
 
--- fun fact: this function is not perfect
--- it has a few false positives sometimes
--- but no false negatives, so that's good
 local function is_cyclic(memo, sub, super)
 	local m = memo[sub]
 	local p = memo[super]
@@ -106,7 +95,7 @@ local function write_table_ex(t, memo, rev_memo, srefs, name)
 	end
 	local m = {}
 	local mi = 1
-	for i = 1, #t do -- don't use ipairs here, we need the gaps
+	for i = 1, #t do
 		local v = t[i]
 		if v == t or is_cyclic(memo, v, t) then
 			srefs[#srefs + 1] = {name, i, v}
@@ -117,12 +106,27 @@ local function write_table_ex(t, memo, rev_memo, srefs, name)
 			mi = mi + 1
 		end
 	end
+
 	local is_player_root = (name == 0) and (t.mnb2Experience ~= nil or t.experience ~= nil or t.gameType ~= nil or t.gameState ~= nil)
+
 	for k,v in pairs(t) do
 		if type(k) ~= 'number' or floor(k) ~= k or k < 1 or k > #t then
-			if is_player_root and type(k) == 'string' and (ALWAYS_TRANSIENT_KEYS[k] or (t.gameType == 1 and CLASSIC_TRANSIENT_KEYS[k])) then
+			-- 1. Strip visual-only tables (particles, floating text)
+			if is_player_root and type(k) == 'string' and type(v) == 'table' and ALWAYS_TRANSIENT_KEYS[k] then
 				m[mi] = (k:match '^[_%a][_%w]*$' and not kw[k]) and (k .. '={}') or ('[' .. write(k, memo, rev_memo) .. ']={}')
 				mi = mi + 1
+
+			-- 2. Clean combat decals (blood/casings) from deco while preserving all map terrain (mud, dirt, trenches)
+			elseif is_player_root and k == "deco" and type(v) == "table" then
+				local clean_deco = {}
+				for _, item in ipairs(v) do
+					if type(item) == "table" and not is_combat_decal(item.name) then
+						clean_deco[#clean_deco + 1] = item
+					end
+				end
+				m[mi] = write_key_value_pair(k, clean_deco, memo, rev_memo)
+				mi = mi + 1
+
 			elseif v == t or k == t or is_cyclic(memo, v, t) or is_cyclic(memo, k, t) then
 				srefs[#srefs + 1] = {name, k, v}
 			else
@@ -153,20 +157,20 @@ return function(t)
 		result[i], result[j] = result[j], result[i]
 	end
 
-	-- 3: add all the tricky cyclic stuff
+	-- 3: add all cyclic references
 	for i, v in ipairs(srefs) do
 		n = n + 1
 		result[n] = write_key_value_pair(v[2], v[3], memo, rev_memo, '_[' .. v[1] .. ']')
 	end
 
-	-- 4: add something about returning the main table
+	-- 4: return main table
 	if result[n]:sub(1, 5) == '_[0]=' then
 		result[n] = 'return ' .. result[n]:sub(6)
 	else
 		result[n + 1] = 'return _[0]'
 	end
 
-	-- 5: just concatenate everything
+	-- 5: concatenate
 	result = concat(result, '\n')
 	return n > 1 and 'local _={}\n' .. result or result
 end
