@@ -87,27 +87,7 @@ payload = '''
 '''
 match_indent = true
 
-# 3. Inject Ctrl+F9 Tactical LOS benchmark
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'if(key == "f9") then'
-position = "before"
-payload = '''
-  if key == "f9" and (love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")) then
-    if los_physics and los_physics.runBenchmark then
-      local bMs, vMs, spd = los_physics.runBenchmark(vanilla_los, 2000)
-      player.textCue[#player.textCue+1] = {}
-      player.textCue[#player.textCue].name = string.format("LOS Bench: %.1fms vs %.1fms (%.1fx)", bMs, vMs, spd)
-      player.textCue[#player.textCue].x = player.screenx + 600
-      player.textCue[#player.textCue].y = 260
-      player.textCue[#player.textCue].alpha = 255
-    end
-  end
-'''
-match_indent = true
-
-# 4. Inject Dev Blast handler on right click
+# 3. Inject Dev Blast handler on right click
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -142,7 +122,7 @@ payload = '''
 '''
 match_indent = true
 
-# 5. Inject F5-F8 dev controls
+# 4. Inject F5-F8 dev controls
 [[patches]]
 [patches.pattern]
 target = "main.lua"

@@ -2,17 +2,6 @@
 -- includes/los_physics.lua
 -- High-Performance Box2D (love.physics) Line-of-Sight & Vision Polygon Engine
 -- ============================================================================
--- Replaces the O(D * N) 10px step-marching loops in los() and los2() with
--- C++ Box2D Bounding Volume Hierarchy (AABB Tree) raycasting while preserving
--- 100% of vanilla Mud and Blood's gameplay mechanics and special rules:
---   * Multi-room/composite building & bunker traversal (insideSwitch logic)
---   * Tree trunk vs. canopy radii (forest[i].type == 8 -> radius / 4)
---   * HawkEye perk (shooter.hawkEye > 0 ignores trees in los2)
---   * Elevation on rocks (target.onRock > 0 ignores rocks in los2)
---   * IR StG44 night-vision scope (ignores smoke losBlockers for infantry)
---   * Anti-tank weapons & armor (fausterAlert / zookerAlert / shooter.armor)
---   * Dynamic 360-degree Vision Polygon generation for Fog of War & Tactical UI
--- ============================================================================
 
 local los_physics = {}
 
@@ -60,11 +49,10 @@ los_physics.debugOverlay = false
 
 -- Internal Box2D state
 local losWorld = nil
-local fixtureRecords = {} -- [tableRef] = { body, fixture, kind, x, y, r, w, h, shapeType, syncId, ref }
+local fixtureRecords = {}
 local syncCounter = 0
 local lastSyncFrame = -1
 
--- Cached table lengths & references for fast mid-frame dirty detection
 local lastForestRef, lastForestLen = nil, -1
 local lastRocksRef, lastRocksLen = nil, -1
 local lastSmokeRef, lastSmokeLen = nil, -1
@@ -72,7 +60,6 @@ local lastPlaceablesRef, lastPlaceablesLen = nil, -1
 local lastVehiclesRef, lastVehiclesLen = nil, -1
 local lastGroundRef, lastGroundLen = nil, -1
 
--- Statistics for debugging / benchmarking
 los_physics.stats = {
   totalRaycasts = 0,
   totalSyncs = 0,
@@ -80,10 +67,6 @@ los_physics.stats = {
   lastBenchmarkMsg = ""
 }
 
--- ----------------------------------------------------------------------------
--- Helper: Determine if a player.groundType entry is a Bunker or Building
--- matching insideBunker2(x, y) or insideBuilding2(x, y) in urb_engine.lua
--- ----------------------------------------------------------------------------
 local function classifyGroundBuilding(g)
   if not g then return nil end
   local rad = g.radius or 0
@@ -93,16 +76,13 @@ local function classifyGroundBuilding(g)
   local name = g.name
 
   if rad ~= 0 then
-    -- insideBunker2 circle: name == "concrete" and cover > 50 and cover ~= 62
     if name == "concrete" and cov > 50 and cov ~= 62 then
       return "circle", g.x, g.y, rad, 0, 0
     end
   elseif w ~= 0 and l ~= 0 then
-    -- insideBunker2 rect: name == "concrete" and cover > 40
     if name == "concrete" and cov > 40 then
       return "rect", g.x, g.y, 0, w, l
     end
-    -- insideBuilding2 rect: name == "wood" and width ~= 89
     if name == "wood" and w ~= 89 then
       return "rect", g.x, g.y, 0, w, l
     end
@@ -110,9 +90,6 @@ local function classifyGroundBuilding(g)
   return nil
 end
 
--- ----------------------------------------------------------------------------
--- Initialize or Reset the Box2D LOS World
--- ----------------------------------------------------------------------------
 function los_physics.init()
   if losWorld then
     losWorld:destroy()
@@ -130,9 +107,6 @@ function los_physics.init()
   los_physics.stats.activeFixtures = 0
 end
 
--- ----------------------------------------------------------------------------
--- Internal: Create or update a Circle fixture in losWorld
--- ----------------------------------------------------------------------------
 local function upsertCircleRecord(obj, kind, x, y, r, syncId)
   if not x or not y or not r or r <= 0 then return end
   local rec = fixtureRecords[obj]
@@ -171,10 +145,6 @@ local function upsertCircleRecord(obj, kind, x, y, r, syncId)
   fixtureRecords[obj] = ud
 end
 
--- ----------------------------------------------------------------------------
--- Internal: Create or update an Axis-Aligned Rectangle fixture in losWorld
--- Note: (x, y) is the top-left corner as used in player.groundType
--- ----------------------------------------------------------------------------
 local function upsertRectRecord(obj, kind, x, y, w, h, syncId)
   if not x or not y or not w or not h or w <= 0 or h <= 0 then return end
   local cx = x + w * 0.5
@@ -215,11 +185,6 @@ local function upsertRectRecord(obj, kind, x, y, w, h, syncId)
   fixtureRecords[obj] = ud
 end
 
--- ----------------------------------------------------------------------------
--- Synchronize Box2D World with live player.* obstacle tables
--- Automatically adds new obstacles, updates moved vehicles, and destroys
--- removed trees/rocks/smoke/buildings.
--- ----------------------------------------------------------------------------
 function los_physics.sync()
   if not losWorld then
     los_physics.init()
@@ -230,7 +195,7 @@ function los_physics.sync()
   local curSync = syncCounter
   los_physics.stats.totalSyncs = los_physics.stats.totalSyncs + 1
 
-  -- 1. Trees (player.forest)
+  -- 1. Trees
   local forest = player.forest
   if forest then
     for i = 1, #forest do
@@ -245,7 +210,7 @@ function los_physics.sync()
     lastForestRef, lastForestLen = nil, 0
   end
 
-  -- 2. Rocks (player.rocks)
+  -- 2. Rocks
   local rocks = player.rocks
   if rocks then
     for i = 1, #rocks do
@@ -260,7 +225,7 @@ function los_physics.sync()
     lastRocksRef, lastRocksLen = nil, 0
   end
 
-  -- 3. Temporary LOS Blockers / Smoke (player.losBlockers)
+  -- 3. Smoke
   local blockers = player.losBlockers
   if blockers then
     for i = 1, #blockers do
@@ -274,7 +239,7 @@ function los_physics.sync()
     lastSmokeRef, lastSmokeLen = nil, 0
   end
 
-  -- 4. Placeables with losBlocker == 1 (player.placeables)
+  -- 4. Placeables
   local placeables = player.placeables
   if placeables then
     for i = 1, #placeables do
@@ -288,13 +253,13 @@ function los_physics.sync()
     lastPlaceablesRef, lastPlaceablesLen = nil, 0
   end
 
-  -- 5. Deployed Vehicles (player.deployedVehicles)
+  -- 5. Vehicles (radius 50)
   local vehicles = player.deployedVehicles
   if vehicles then
     for i = 1, #vehicles do
       local v = vehicles[i]
       if v and v.x and v.y and v.tag and not LIGHT_VEHICLE_TAGS_LOS2[v.tag] then
-        upsertCircleRecord(v, "vehicle", v.x, v.y, 100, curSync)
+        upsertCircleRecord(v, "vehicle", v.x, v.y, 50, curSync)
       end
     end
     lastVehiclesRef, lastVehiclesLen = vehicles, #vehicles
@@ -302,7 +267,7 @@ function los_physics.sync()
     lastVehiclesRef, lastVehiclesLen = nil, 0
   end
 
-  -- 6. Buildings & Bunkers in player.groundType
+  -- 6. Buildings
   local ground = player.groundType
   if ground then
     for i = 1, #ground do
@@ -319,7 +284,7 @@ function los_physics.sync()
     lastGroundRef, lastGroundLen = nil, 0
   end
 
-  -- Sweep & destroy any stale Box2D bodies removed from the game tables
+  -- Sweep stale bodies
   local activeCount = 0
   for obj, rec in pairs(fixtureRecords) do
     if rec.syncId ~= curSync then
@@ -334,9 +299,6 @@ function los_physics.sync()
   los_physics.stats.activeFixtures = activeCount
 end
 
--- ----------------------------------------------------------------------------
--- Fast check to ensure Box2D world is synced with current frame & table counts
--- ----------------------------------------------------------------------------
 local currentFrameId = 0
 function los_physics.updateFrame()
   currentFrameId = currentFrameId + 1
@@ -371,9 +333,6 @@ function los_physics.ensureSynced()
   end
 end
 
--- ----------------------------------------------------------------------------
--- Helper: Point-in-building check against ONLY the buildings hit by a ray
--- ----------------------------------------------------------------------------
 local function isPointInHitBuildings(px, py, hitBuildings, count)
   for i = 1, count do
     local b = hitBuildings[i]
@@ -392,10 +351,6 @@ local function isPointInHitBuildings(px, py, hitBuildings, count)
   return false
 end
 
--- ----------------------------------------------------------------------------
--- Helper: Evaluate vanilla insideSwitch building traversal on hitBuildings
--- Matches the exact state transitions of los() and los2() in urb_engine.lua
--- ----------------------------------------------------------------------------
 local function evaluateBuildingTraversal(x1, y1, x2, y2, losDistance, hitBuildings, hitCount, isLos2)
   local losSamples = losDistance * 0.1
   local losAngle = -math.atan2((x1 - x2), (y1 - y2))
@@ -436,30 +391,26 @@ local function evaluateBuildingTraversal(x1, y1, x2, y2, losDistance, hitBuildin
   return true
 end
 
--- Reusable scratch table for buildings touched during a single raycast
 local scratchBuildings = {}
 local scratchBuildingSeen = {}
 
 -- ----------------------------------------------------------------------------
 -- Drop-in Replacement for los(x1, x2, y1, y2)
--- Parameter order is (x1, x2, y1, y2) to match urb_engine.lua:3860!
 -- ----------------------------------------------------------------------------
-function los_physics.checkLOS(x1, y1, x2, y2)
-  if not (x1 and y1 and x2 and y2) then return false end
+function los_physics.checkLOS(x1, x2, y1, y2)
+  if not (x1 and x2 and y1 and y2) then return false end
 
   local dx = x2 - x1
   local dy = y2 - y1
   local losDistance = math.sqrt(dx * dx + dy * dy)
 
-  -- In vanilla los(), distances < 50 always return true on sample 0
-  if losDistance < 50 then
+  if losDistance < 1e-3 then
     return true
   end
 
   los_physics.ensureSynced()
   los_physics.stats.totalRaycasts = los_physics.stats.totalRaycasts + 1
 
-  -- Sync vehicle positions if any heavy vehicles exist (usually 0-5)
   local vehicles = player and player.deployedVehicles
   if vehicles then
     for i = 1, #vehicles do
@@ -476,7 +427,6 @@ function los_physics.checkLOS(x1, y1, x2, y2)
   local blocked = false
   local bCount = 0
 
-  -- 1. Point query at ray origin (x1, y1) via Box2D AABB Tree
   losWorld:queryBoundingBox(x1 - 1, y1 - 1, x1 + 1, y1 + 1, function(fixture)
     local ud = fixture:getUserData()
     if not ud then return true end
@@ -495,7 +445,6 @@ function los_physics.checkLOS(x1, y1, x2, y2)
           return false
         end
       else
-        -- tree, rock, smoke, placeable containing (x1, y1)
         blocked = true
         return false
       end
@@ -508,7 +457,6 @@ function los_physics.checkLOS(x1, y1, x2, y2)
     return false
   end
 
-  -- 2. Box2D C++ Raycast along the segment sampled by vanilla
   local maxSampleLen = math.floor(losDistance * 0.1) * 10
   local tEnd = (maxSampleLen > 0) and (maxSampleLen / losDistance) or 1.0
   local endX = x1 + dx * tEnd
@@ -526,18 +474,17 @@ function los_physics.checkLOS(x1, y1, x2, y2)
           bCount = bCount + 1
           scratchBuildings[bCount] = ud
         end
-        return -1 -- Ignore clipping and continue collecting building fixtures
+        return -1
       elseif kind == "vehicle" then
         local v = ud.ref
         if v and not LIGHT_VEHICLE_TAGS_LOS1[v.tag] then
           blocked = true
-          return 0 -- Terminate raycast immediately
+          return 0
         end
         return -1
       else
-        -- tree, rock, smoke, placeable hit!
         blocked = true
-        return 0 -- Terminate raycast immediately
+        return 0
       end
     end)
   end
@@ -547,7 +494,6 @@ function los_physics.checkLOS(x1, y1, x2, y2)
     return false
   end
 
-  -- 3. If the ray touched any buildings/bunkers, evaluate insideSwitch
   local clear = true
   if bCount > 0 then
     clear = evaluateBuildingTraversal(x1, y1, x2, y2, losDistance, scratchBuildings, bCount, false)
@@ -559,7 +505,6 @@ end
 
 -- ----------------------------------------------------------------------------
 -- Drop-in Replacement for los2(shooter, target)
--- Preserves all unit-specific perks and equipment rules from urb_engine.lua:3950
 -- ----------------------------------------------------------------------------
 function los_physics.checkLOS2(shooter, target)
   if not shooter or not target or not shooter.x or not shooter.y or not target.x or not target.y then
@@ -572,20 +517,18 @@ function los_physics.checkLOS2(shooter, target)
   local dy = y2 - y1
   local losDistance = math.sqrt(dx * dx + dy * dy)
 
-  if losDistance < 50 then
+  if losDistance < 1e-3 then
     return true
   end
 
   los_physics.ensureSynced()
   los_physics.stats.totalRaycasts = los_physics.stats.totalRaycasts + 1
 
-  -- Pre-evaluate unit perk/weapon filter flags once per call
   local checkTrees = ((shooter.hawkEye or 0) <= 0)
   local checkRocks = ((target.onRock or 0) == 0)
   local checkSmoke = ((shooter.armor or 0) > 0) or (not shooter.weapon) or (shooter.weapon.tag ~= "irstg44")
-  local checkVehicles = ((shooter.armor or 0) == 0) and (fausterAlert(shooter) <= 0 and zookerAlert(shooter) <= 0)
+  local checkVehicles = ((shooter.armor or 0) == 0) and (fausterAlert and zookerAlert and fausterAlert(shooter) <= 0 and zookerAlert(shooter) <= 0)
 
-  -- Sync vehicle positions if we need to check vehicles
   if checkVehicles then
     local vehicles = player and player.deployedVehicles
     if vehicles then
@@ -604,7 +547,6 @@ function los_physics.checkLOS2(shooter, target)
   local blocked = false
   local bCount = 0
 
-  -- 1. Point query at shooter origin (x1, y1)
   losWorld:queryBoundingBox(x1 - 1, y1 - 1, x1 + 1, y1 + 1, function(fixture)
     local ud = fixture:getUserData()
     if not ud then return true end
@@ -638,7 +580,6 @@ function los_physics.checkLOS2(shooter, target)
     return false
   end
 
-  -- 2. Box2D C++ Raycast from shooter to target
   local maxSampleLen = math.floor(losDistance * 0.1) * 10
   local tEnd = (maxSampleLen > 0) and (maxSampleLen / losDistance) or 1.0
   local endX = x1 + dx * tEnd
@@ -683,7 +624,6 @@ function los_physics.checkLOS2(shooter, target)
     return false
   end
 
-  -- 3. Evaluate building/bunker traversal on touched buildings
   local clear = true
   if bCount > 0 then
     clear = evaluateBuildingTraversal(x1, y1, x2, y2, losDistance, scratchBuildings, bCount, true)
@@ -694,10 +634,7 @@ function los_physics.checkLOS2(shooter, target)
 end
 
 -- ----------------------------------------------------------------------------
--- Continuous Raycast Query for Vision Polygons, Fog of War & Smart Cover AI
--- Computes exact exit-wall occlusion for buildings so soldiers see into
--- buildings up to the far wall, and stops at the front edge of trees/rocks/smoke.
--- Returns: hit (bool), hitX, hitY, hitFraction, hitKind, hitRef
+-- Continuous Raycast Query for Vision Polygons & Tactical View
 -- ----------------------------------------------------------------------------
 function los_physics.castRay(x1, y1, x2, y2, opts)
   local dx = x2 - x1
@@ -733,8 +670,6 @@ function los_physics.castRay(x1, y1, x2, y2, opts)
     local effectiveFrac = fraction
     local effX, effY = hx, hy
 
-    -- For buildings entered from outside, vision penetrates into the building
-    -- and is blocked where the ray exits the far wall of the building!
     if kind == "building" and not (opts and opts.stopAtBuildingEntry) then
       if ud.shapeType == "rect" then
         local txExit = math.huge
@@ -749,13 +684,11 @@ function los_physics.castRay(x1, y1, x2, y2, opts)
         end
         effectiveFrac = math.min(txExit, tyExit)
       else
-        -- Circle bunker: symmetric chord reflection across projection of center
         local tMid = ((ud.x - x1) * dx + (ud.y - y1) * dy) / distSq
         effectiveFrac = math.max(fraction, 2 * tMid - fraction)
       end
 
       if effectiveFrac >= 1.0 then
-        -- Ray terminates inside the building before exiting the back wall
         return -1
       end
       effX = x1 + dx * effectiveFrac
@@ -776,13 +709,9 @@ function los_physics.castRay(x1, y1, x2, y2, opts)
   return hitAny, bestX, bestY, bestFrac, bestKind, bestRef
 end
 
--- ----------------------------------------------------------------------------
--- Compute a 2D Vision Fan / Polygon around (originX, originY) using Box2D rays
--- Ready for Fog-of-War Stencil/Canvas rendering and F9 Tactical View
--- ----------------------------------------------------------------------------
 function los_physics.computeVisionPolygon(originX, originY, maxRange, numRays, opts)
   maxRange = maxRange or 650
-  numRays = numRays or 64
+  numRays = numRays or 48
   local points = {}
   local twoPi = math.pi * 2
 
@@ -798,20 +727,48 @@ function los_physics.computeVisionPolygon(originX, originY, maxRange, numRays, o
   return points
 end
 
+local function resolveUnitTarget(unit, candidates)
+  if not unit or not unit.target or not candidates then return nil end
+  local t = unit.target
+
+  if type(t) == "table" and t.x and t.y and (t.dead or 0) == 0 then
+    return t
+  end
+
+  if type(t) == "number" and candidates[t] then
+    local cand = candidates[t]
+    if cand and (cand.dead or 0) == 0 and (cand.health or 0) > 0 then
+      return cand
+    end
+  end
+
+  if type(t) == "number" then
+    for i = 1, #candidates do
+      local cand = candidates[i]
+      if cand and cand.id == t and (cand.dead or 0) == 0 and (cand.health or 0) > 0 then
+        return cand
+      end
+    end
+  end
+
+  return nil
+end
+
 -- ----------------------------------------------------------------------------
--- Draw Debug Overlay when los_physics.debugOverlay == true (Dedicated F10 toggle)
--- Displays real-time Box2D raycast vision fans for Allied soldiers,
--- active enemy sightlines, and outlines Box2D building/bunker colliders.
+-- Draw Debug Overlay (F10 Toggle)
 -- ----------------------------------------------------------------------------
 function los_physics.drawDebugOverlay()
   if not player then return end
-  local overlayActive = (los_physics.debugOverlay == true)
-  if not overlayActive then return end
+  if los_physics.debugOverlay ~= true then return end
 
   los_physics.ensureSynced()
   if not losWorld then return end
 
-  -- 1. Draw Box2D building/bunker collider outlines in cyan
+  local troops = player.deployedTroops
+  local enemies = foes or _G.foes or (player and player.foes)
+  local camX = (player.screenx or 0) + 640
+
+  -- 1. Draw Box2D building colliders in cyan
   love.graphics.setColor(love.math.colorFromBytes(0, 230, 255, 180))
   for _, rec in pairs(fixtureRecords) do
     if rec.kind == "building" then
@@ -823,9 +780,7 @@ function los_physics.drawDebugOverlay()
     end
   end
 
-  -- 2. Draw real-time Box2D raycast vision fan for currently selected soldiers,
-  --    or ALL living allied soldiers if no soldier is explicitly selected
-  local troops = player.deployedTroops
+  -- 2. Draw Allied Vision Fans, Heading Rays & Sightlines
   if troops then
     local anySelected = false
     for i = 1, #troops do
@@ -838,8 +793,9 @@ function los_physics.drawDebugOverlay()
 
     for i = 1, #troops do
       local s = troops[i]
-      local shouldDraw = (s and (s.dead or 0) == 0 and (s.health or 0) > 0) and
-        ((anySelected and s.selected == true) or (not anySelected and s.faction == "allied"))
+      local isAlive = s and (s.dead or 0) == 0 and (s.health or 0) > 0
+      local shouldDraw = isAlive and ((anySelected and s.selected == true) or not anySelected)
+
       if shouldDraw then
         local opts = {
           ignoreTrees = ((s.hawkEye or 0) > 0),
@@ -849,64 +805,152 @@ function los_physics.drawDebugOverlay()
         }
         local visionRange = 600
         if s.weapon and s.weapon.range and s.weapon.range > 300 then
-          visionRange = math.min(1000, s.weapon.range)
+          visionRange = math.min(900, s.weapon.range)
         end
-        local rayCount = anySelected and 64 or 40
+        local rayCount = anySelected and 64 or 36
         local poly = los_physics.computeVisionPolygon(s.x, s.y, visionRange, rayCount, opts)
         local n = #poly
+
         if n >= 6 then
           local fillAlpha = anySelected and 45 or 25
           local lineAlpha = anySelected and 200 or 120
-          -- Draw translucent triangle fan from (s.x, s.y)
           love.graphics.setColor(love.math.colorFromBytes(60, 240, 120, fillAlpha))
           for j = 1, n - 2, 2 do
             love.graphics.polygon("fill", s.x, s.y, poly[j], poly[j + 1], poly[j + 2], poly[j + 3])
           end
           love.graphics.polygon("fill", s.x, s.y, poly[n - 1], poly[n], poly[1], poly[2])
 
-          -- Draw perimeter ray endpoints
           love.graphics.setColor(love.math.colorFromBytes(70, 255, 130, lineAlpha))
           for j = 1, n - 2, 2 do
             love.graphics.line(poly[j], poly[j + 1], poly[j + 2], poly[j + 3])
           end
           love.graphics.line(poly[n - 1], poly[n], poly[1], poly[2])
-
-          -- Draw heading ray
-          if s.rotation then
-            local hx = s.x - math.sin(s.rotation) * 50
-            local hy = s.y + math.cos(s.rotation) * 50
-            love.graphics.setColor(love.math.colorFromBytes(255, 255, 120, 220))
-            love.graphics.line(s.x, s.y, hx, hy)
-          end
         end
 
-        -- Draw enemy sightline if engaged or target present
-        if s.target and s.target > 0 then
-          for o = 1, #troops do
-            local e = troops[o]
-            if e and e.id == s.target and (e.dead or 0) == 0 and (e.health or 0) > 0 then
-              local clear = los2(s, e)
-              if clear then
-                love.graphics.setColor(love.math.colorFromBytes(0, 255, 80, 220))
-              else
-                love.graphics.setColor(love.math.colorFromBytes(255, 50, 50, 200))
-              end
-              love.graphics.setLineWidth(1.5)
-              love.graphics.line(s.x, s.y, e.x, e.y)
-              love.graphics.setLineWidth(1)
-              break
-            end
+        if s.rotation then
+          local castRange = math.max(1000, visionRange)
+          local targetX = s.x - math.sin(s.rotation) * castRange
+          local targetY = s.y + math.cos(s.rotation) * castRange
+
+          local hit, hx, hy, frac, hitKind = los_physics.castRay(s.x, s.y, targetX, targetY, opts)
+
+          -- Draw the yellow line right to the collision point
+          love.graphics.setColor(love.math.colorFromBytes(255, 255, 80, 240))
+          love.graphics.setLineWidth(2)
+          love.graphics.line(s.x, s.y, hx, hy)
+
+          -- If an obstacle stopped the ray, draw an impact indicator
+          if hit or frac < 0.999 then
+            love.graphics.setColor(love.math.colorFromBytes(255, 50, 50, 255))
+            love.graphics.circle("fill", hx, hy, 4)
+            love.graphics.setColor(love.math.colorFromBytes(255, 255, 255, 220))
+            love.graphics.circle("line", hx, hy, 4)
           end
+          love.graphics.setLineWidth(1)
+        end
+
+        -- Draw Allied -> Enemy targeting sightline
+        local targetEnemy = resolveUnitTarget(s, enemies)
+        if targetEnemy then
+          local clear = los2(s, targetEnemy)
+          if clear then
+            love.graphics.setColor(love.math.colorFromBytes(0, 255, 80, 220))
+            love.graphics.setLineWidth(1.5)
+            love.graphics.line(s.x, s.y, targetEnemy.x, targetEnemy.y)
+          else
+            -- Obstructed: show line up to the blocking obstacle
+            local _, bx, by = los_physics.castRay(s.x, s.y, targetEnemy.x, targetEnemy.y, opts)
+            love.graphics.setColor(love.math.colorFromBytes(255, 50, 50, 200))
+            love.graphics.setLineWidth(1.5)
+            love.graphics.line(s.x, s.y, bx, by)
+            love.graphics.circle("fill", bx, by, 3.5)
+          end
+          love.graphics.setLineWidth(1)
         end
       end
     end
   end
 
-  -- 3. Draw tactical on-screen indicator banner
+  -- 3. Draw Enemy Vision Fans, Heading Rays & Sightlines
+  if enemies then
+    for i = 1, #enemies do
+      local e = enemies[i]
+      local isAlive = e and (e.dead or 0) == 0 and (e.health or 0) > 0
+      local nearScreen = isAlive and e.x and math.abs(e.x - camX) < 1000
+
+      if nearScreen then
+        local opts = {
+          ignoreTrees = ((e.hawkEye or 0) > 0),
+          ignoreSmoke = false,
+          ignoreVehicles = ((e.armor or 0) > 0),
+          ignoreUnit = e
+        }
+        local visionRange = 550
+        if e.weapon and e.weapon.range and e.weapon.range > 300 then
+          visionRange = math.min(850, e.weapon.range)
+        end
+
+        local poly = los_physics.computeVisionPolygon(e.x, e.y, visionRange, 32, opts)
+        local n = #poly
+
+        if n >= 6 then
+          love.graphics.setColor(love.math.colorFromBytes(255, 60, 60, 20))
+          for j = 1, n - 2, 2 do
+            love.graphics.polygon("fill", e.x, e.y, poly[j], poly[j + 1], poly[j + 2], poly[j + 3])
+          end
+          love.graphics.polygon("fill", e.x, e.y, poly[n - 1], poly[n], poly[1], poly[2])
+
+          love.graphics.setColor(love.math.colorFromBytes(255, 90, 70, 120))
+          for j = 1, n - 2, 2 do
+            love.graphics.line(poly[j], poly[j + 1], poly[j + 2], poly[j + 3])
+          end
+          love.graphics.line(poly[n - 1], poly[n], poly[1], poly[2])
+        end
+
+        -- FULL-LENGTH ENEMY HEADING RAY (stops when blocked)
+        if e.rotation then
+          local castRange = math.max(900, visionRange)
+          local targetX = e.x - math.sin(e.rotation) * castRange
+          local targetY = e.y + math.cos(e.rotation) * castRange
+
+          local hit, hx, hy, frac = los_physics.castRay(e.x, e.y, targetX, targetY, opts)
+
+          love.graphics.setColor(love.math.colorFromBytes(255, 160, 50, 220))
+          love.graphics.setLineWidth(1.5)
+          love.graphics.line(e.x, e.y, hx, hy)
+          if hit or frac < 0.999 then
+            love.graphics.setColor(love.math.colorFromBytes(255, 40, 40, 240))
+            love.graphics.circle("fill", hx, hy, 3)
+          end
+          love.graphics.setLineWidth(1)
+        end
+
+        -- Draw Enemy -> Allied targeting sightline
+        local targetAlly = resolveUnitTarget(e, troops)
+        if targetAlly then
+          local clear = los2(e, targetAlly)
+          if clear then
+            love.graphics.setColor(love.math.colorFromBytes(255, 170, 0, 220))
+            love.graphics.setLineWidth(1.5)
+            love.graphics.line(e.x, e.y, targetAlly.x, targetAlly.y)
+          else
+            local _, bx, by = los_physics.castRay(e.x, e.y, targetAlly.x, targetAlly.y, opts)
+            love.graphics.setColor(love.math.colorFromBytes(255, 40, 40, 180))
+            love.graphics.setLineWidth(1.5)
+            love.graphics.line(e.x, e.y, bx, by)
+            love.graphics.circle("fill", bx, by, 3)
+          end
+          love.graphics.setLineWidth(1)
+        end
+      end
+    end
+  end
+
+  -- 4. Banner indicator
   if nonoFont then
     love.graphics.setFont(nonoFont)
     love.graphics.setColor(love.math.colorFromBytes(0, 0, 0, 200))
-    love.graphics.rectangle("fill", 10, 10, 250, 22)
+    love.graphics.rectangle("fill", 10, 10, 270, 22)
     love.graphics.setColor(love.math.colorFromBytes(50, 240, 120, 255))
     love.graphics.print("[F10] LOS VISION OVERLAY: ACTIVE", 16, 14)
   end
@@ -915,14 +959,12 @@ function los_physics.drawDebugOverlay()
 end
 
 -- ----------------------------------------------------------------------------
--- Self-Test & Live Benchmark against Vanilla Ray-Marching
--- Verifies equivalence and measures speedup on the active map
+-- Self-Test & Live Benchmark
 -- ----------------------------------------------------------------------------
 function los_physics.runBenchmark(vanillaLosFunc, numIterations)
   numIterations = numIterations or 2000
   los_physics.sync()
 
-  -- Generate deterministic test ray pairs across the map
   local pairsList = {}
   local mapW = (player and player.endLine and player.endLine > 1000) and player.endLine or 10000
   for i = 1, numIterations do

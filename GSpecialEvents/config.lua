@@ -120,13 +120,13 @@ local config = {
       id = "halloween_reanim_delay",
       label = "Rising Delay",
       type = "cycle",
-      options = { 1.5, 2.5, 4.0, 6.0 },
-      labels = { "1.5s (Rapid)", "2.5s (Standard)", "4.0s (Slow)", "6.0s (Lurking)" },
-      default = 2.5,
+      options = { 1.0, 5.0, 15.0, 30.0 },
+      labels = { "1s (Rapid)", "5s (Standard)", "15s (Slow)", "30s (Lurking)" },
+      default = 5.0,
       description = "Seconds elapsed after a soldier's death before their corpse reanimates as a zombie",
       showIf = isHalloweenActive,
       get = function()
-        return (SpecialEvents and SpecialEvents.settings.halloween.reanimationDelay) or 2.5
+        return (SpecialEvents and SpecialEvents.settings.halloween.reanimationDelay) or 5.0
       end,
       set = function(val)
         if SpecialEvents then
