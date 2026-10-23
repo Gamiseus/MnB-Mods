@@ -14,6 +14,12 @@ name = "includes/ser"
 
 [[patches]]
 [patches.module]
+source = "particlesSystem.lua"
+before = "main.lua"
+name = "includes/particlesSystem"
+
+[[patches]]
+[patches.module]
 source = "los_physics.lua"
 before = "main.lua"
 name = "includes/los_physics"
@@ -36,6 +42,12 @@ source = "pathfinding.lua"
 before = "main.lua"
 name = "includes/pathfinding"
 
+[[patches]]
+[patches.module]
+source = "combined_benchmark.lua"
+before = "main.lua"
+name = "includes/combined_benchmark"
+
 
 # =========================================================================
 # ENGINE CONFIGURATION (conf.lua)
@@ -57,6 +69,14 @@ target = "conf.lua"
 pattern = "t.modules.thread = false           -- Enable the thread module (boolean)"
 position = "at"
 payload = "t.modules.thread = true            -- Enable the thread module (boolean)"
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+target = "conf.lua"
+pattern = "t.window.vsync = true           -- Enable vertical sync (boolean)"
+position = "at"
+payload = "t.window.vsync = false           -- Enable vertical sync (boolean)"
 match_indent = true
 
 # =========================================================================
@@ -179,11 +199,26 @@ payload = '''
 '''
 match_indent = true
 
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = 'function love.load()'
+position = "before"
+payload = '''
+require("includes/combined_benchmark")
+'''
+match_indent = true
+
+
 # =========================================================================
 # KEYBINDS & DEBUG OVERLAYS (main.lua)
 # =========================================================================
 
-# F10: Toggle LOS Vision Overlay
+# Dedicated F10 Keybind:
+# - Shift+F10 : Sustained Continuous Benchmark (Vanilla vs Modded over time)
+# - Alt+F10   : Particle System Solo Bench
+# - Ctrl+F10  : Decal Baker Solo Bench
+# - F10       : Toggle LOS Vision Overlay
 [[patches]]
 [patches.pattern]
 target = "main.lua"
@@ -194,16 +229,68 @@ pattern = '''
 position = "before"
 payload = '''
   if(key == "f10") then
-    if los_physics then
-      los_physics.debugOverlay = not los_physics.debugOverlay
-      local isOn = los_physics.debugOverlay
-      player.textCue[#player.textCue+1] = {}
-      player.textCue[#player.textCue].name = isOn and "LOS Vision Overlay ON" or "LOS Vision Overlay OFF"
-      player.textCue[#player.textCue].x = player.screenx + 600
-      player.textCue[#player.textCue].y = 300
-      player.textCue[#player.textCue].alpha = 255
-      local sfx = isOn and gageUp or gageDown
-      if sfx then local cl = sfx:clone(); cl:play() end
+    local ctrlDown = love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")
+    local altDown = love.keyboard.isDown("lalt") or love.keyboard.isDown("ralt")
+    local shiftDown = love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")
+
+    if shiftDown then
+      if runContinuousBenchmark then
+        -- Runs for 3.0s vanilla, then 3.0s modded with 50,000 particles, 800,000 decals, 10,000 LOS rays
+        local res = runContinuousBenchmark(10.0, 50000, 8000000, 10000, vanilla_los)
+        if player and player.textCue and res then
+          local baseY = 160
+          local cues = {
+            string.format("SUSTAINED BENCH (%.0fs each): %.1f FPS vs %.1f FPS (%.1fx Throughput)", res.duration, res.optFps, res.vFps, res.throughputSpeedup),
+            string.format(" - Avg Frame: %.2fms vs %.2fms | Calls: %d->%d", res.optAvgMs, res.vAvgMs, res.vCalls, res.optCalls),
+            string.format(" - Particles (%d): %.2fms vs %.2fms (%.1fx)", res.particleCount, res.optPartMs, res.vPartMs, res.partSpeedup),
+            string.format(" - Decals (%d): %.2fms vs %.2fms (%.1fx) [Bake: %.1fms]", res.decalCount, res.optDecalMs, res.vDecalMs, res.decalSpeedup, res.bakeMs),
+            string.format(" - LOS Rays (%d): %.2fms vs %.2fms (%.1fx)", res.losCount, res.optLosMs, res.vLosMs, res.losSpeedup),
+            string.format(" - Spikes: Modded [max %.1fms] vs Vanilla [max %.1fms]", res.optMaxMs, res.vMaxMs)
+          }
+          for i, txt in ipairs(cues) do
+            local idx = #player.textCue + 1
+            player.textCue[idx] = {}
+            player.textCue[idx].name = txt
+            player.textCue[idx].x = player.screenx + 500
+            player.textCue[idx].y = baseY + ((i - 1) * 24)
+            player.textCue[idx].alpha = 255
+          end
+        end
+      end
+    elseif altDown then
+      if runParticleBenchmark then
+        local oMs, vMs, spd, cPct, cnt, vCalls, oCalls = runParticleBenchmark(50000, 5)
+        if player and player.textCue then
+          player.textCue[#player.textCue+1] = {}
+          player.textCue[#player.textCue].name = string.format("Particles (%d): %.2fms vs %.2fms (%.1fx) [Culled: %.0f%% | Calls: %d->%d]", cnt, oMs, vMs, spd, cPct, vCalls, oCalls)
+          player.textCue[#player.textCue].x = player.screenx + 600
+          player.textCue[#player.textCue].y = 200
+          player.textCue[#player.textCue].alpha = 255
+        end
+      end
+    elseif ctrlDown then
+      if decal_baker and decal_baker.runBenchmark then
+        local bMs, vMs, spd, bakeMs, cnt = decal_baker.runBenchmark(5000000)
+        if player and player.textCue then
+          player.textCue[#player.textCue+1] = {}
+          player.textCue[#player.textCue].name = string.format("Decals (%d): %.2fms vs %.2fms (%.1fx) [Bake: %.1fms]", cnt, bMs, vMs, spd, bakeMs)
+          player.textCue[#player.textCue].x = player.screenx + 600
+          player.textCue[#player.textCue].y = 230
+          player.textCue[#player.textCue].alpha = 255
+        end
+      end
+    else
+      if los_physics then
+        los_physics.debugOverlay = not los_physics.debugOverlay
+        local isOn = los_physics.debugOverlay
+        player.textCue[#player.textCue+1] = {}
+        player.textCue[#player.textCue].name = isOn and "LOS Vision Overlay ON" or "LOS Vision Overlay OFF"
+        player.textCue[#player.textCue].x = player.screenx + 600
+        player.textCue[#player.textCue].y = 300
+        player.textCue[#player.textCue].alpha = 255
+        local sfx = isOn and gageUp or gageDown
+        if sfx then local cl = sfx:clone(); cl:play() end
+      end
     end
   end
 '''
@@ -218,7 +305,7 @@ position = "before"
 payload = '''
   if key == "f9" and (love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")) then
     if los_physics and los_physics.runBenchmark then
-      local bMs, vMs, spd = los_physics.runBenchmark(vanilla_los, 2000)
+      local bMs, vMs, spd = los_physics.runBenchmark(vanilla_los, 10000)
       player.textCue[#player.textCue+1] = {}
       player.textCue[#player.textCue].name = string.format("LOS Bench: %.1fms vs %.1fms (%.1fx)", bMs, vMs, spd)
       player.textCue[#player.textCue].x = player.screenx + 600
@@ -647,6 +734,79 @@ payload = '''
     for n=1, #player.deco, 1 do
       love.graphics.draw( _G[player.deco[n].name], player.deco[n].x, player.deco[n].y, player.deco[n].rotation, player.deco[n].size/10, player.deco[n].size/10, _G[player.deco[n].name]:getWidth( )/2, _G[player.deco[n].name]:getHeight( )/2)
     end
+  end
+'''
+match_indent = true
+
+# Replace un-culled particle drawing with frustum culling, color caching, and null safety
+[[patches]]
+[patches.pattern]
+target = "includes/drawFiles.lua"
+pattern = '''
+  for i=1, #player.particles, 1 do
+    love.graphics.setColor( love.math.colorFromBytes(255, 255, 255, player.particles[i].alpha)) 
+    if player.particles[i].typez == "muzzleFlash" then
+        -- pass 1: bright core
+        love.graphics.setShader(muzzleFlashShader)
+        love.graphics.setBlendMode("add")
+        love.graphics.draw(
+            _G[player.particles[i].sprite],
+            player.particles[i].x, player.particles[i].y,
+            player.particles[i].innerRotation,
+            player.particles[i].scale, player.particles[i].scale,
+            player.particles[i].xoffset, player.particles[i].yoffset - 20
+        )
+        love.graphics.setShader()
+
+        -- pass 2 (optional): soft halo spill
+        -- tie halo alpha to particle alpha so it dies quickly
+        local a = player.particles[i].alpha
+        love.graphics.setColor(255, 230, 160, math.min(180, a)) -- warm, softer alpha
+        love.graphics.draw(
+            _G[player.particles[i].sprite],
+            player.particles[i].x, player.particles[i].y,
+            player.particles[i].innerRotation,
+            player.particles[i].scale * 1.1, player.particles[i].scale * 1.1,
+            player.particles[i].xoffset, player.particles[i].yoffset - 20
+        )
+
+        love.graphics.setBlendMode("alpha") -- reset
+    elseif(player.particles[i].typez == "bazookaFlash") then
+      love.graphics.draw(_G[player.particles[i].sprite], player.particles[i].x, player.particles[i].y, (player.particles[i].innerRotation),player.particles[i].scale,player.particles[i].scale, player.particles[i].xoffset, player.particles[i].yoffset-20)
+    elseif(player.particles[i].typez == "flarePart" or player.particles[i].typez == "redFlarePart") then
+      if(randNbr(100)< 50) then
+        local flareScale = randNbr(15)/10
+        love.graphics. draw(_G[player.particles[i].sprite], player.particles[i].x, player.particles[i].y, math.rad(randNbr(360)), flareScale, flareScale, player.particles[i].xoffset, player.particles[i].yoffset)
+      end
+    else
+      love.graphics.draw(_G[player.particles[i].sprite], player.particles[i].x, player.particles[i].y, (player.particles[i].innerRotation),player.particles[i].scale,player.particles[i].scale, player.particles[i].xoffset, player.particles[i].yoffset)
+    end
+  end
+'''
+position = "at"
+payload = '''
+  if drawParticleList then
+    drawParticleList(player.particles, false)
+  end
+'''
+match_indent = true
+
+# Replace un-culled topParticles drawing with frustum culling & color caching
+[[patches]]
+[patches.pattern]
+target = "includes/drawFiles.lua"
+pattern = '''
+  if(#player.topParticles > 0) then
+    for i=1, #player.topParticles, 1 do
+      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255, player.topParticles[i].alpha))
+      love.graphics.draw(_G[player.topParticles[i].sprite], player.topParticles[i].x, player.topParticles[i].y, (player.topParticles[i].innerRotation),player.topParticles[i].scale,player.topParticles[i].scale, player.topParticles[i].xoffset, player.topParticles[i].yoffset)
+    end
+  end
+'''
+position = "at"
+payload = '''
+  if drawParticleList then
+    drawParticleList(player.topParticles, true)
   end
 '''
 match_indent = true

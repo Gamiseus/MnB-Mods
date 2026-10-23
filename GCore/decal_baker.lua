@@ -74,7 +74,8 @@ local function stamp_range(decal_list, start_idx, end_idx)
             b = {}
             batches[col] = b
           end
-          b[#b + 1] = { d = d, img = img, w = w, h = h, scale = scale }
+          -- Store only the index, not a new table!
+          b[#b + 1] = i
         end
       end
     end
@@ -90,18 +91,19 @@ local function stamp_range(decal_list, start_idx, end_idx)
   love.graphics.origin()
   love.graphics.setColor(1, 1, 1, 1)
 
-  for col, items in pairs(batches) do
+  for col, indices in pairs(batches) do
     local c = get_or_create_chunk(col)
     love.graphics.setCanvas(c)
     local ox = col * CHUNK_WIDTH
-    for j = 1, #items do
-      local item = items[j]
-      local d = item.d
+    for j = 1, #indices do
+      local d = decal_list[indices[j]]
+      local img = _G[d.name]
+      local w, h = get_image_dims(img)
+      local sc = (d.size or 10) / 10
       local lx = d.x - ox
       local ly = d.y
       local rot = d.rotation or 0
-      local sc = item.scale
-      love.graphics.draw(item.img, lx, ly, rot, sc, sc, item.w * 0.5, item.h * 0.5)
+      love.graphics.draw(img, lx, ly, rot, sc, sc, w * 0.5, h * 0.5)
     end
   end
 
@@ -181,19 +183,20 @@ function decal_baker.clean_excess()
   if #player.deco > max_decals then
     local excess = #player.deco - max_decals
     local removed = 0
-    
-    for i = #player.deco, 1, -1 do
+    local kept = {}
+
+    -- Keep immune decals and the newest non-immune decals
+    for i = 1, #player.deco do
       local d = player.deco[i]
-      if not is_immune(d) then
-        table.remove(player.deco, i)
+      if is_immune(d) or removed >= excess then
+        kept[#kept + 1] = d
+      else
         removed = removed + 1
-        if removed >= excess then
-          break
-        end
       end
     end
 
     if removed > 0 then
+      player.deco = kept
       decal_baker.force_rebake()
       decal_baker.sync()
     end
@@ -233,6 +236,144 @@ function decal_baker.init()
   end
 
   print("[GCore] Decal Baker initialized")
+end
+
+-- ----------------------------------------------------------------------------
+-- Self-Test & Live Benchmark
+-- ----------------------------------------------------------------------------
+function decal_baker.runBenchmark(count, passes)
+  count = count or 30000000
+  passes = passes or 5
+
+  local orig_deco = player and player.deco
+  local orig_canvas = love.graphics.getCanvas()
+  local prev_blend, prev_alpha = love.graphics.getBlendMode()
+  local prev_r, prev_g, prev_b, prev_a = love.graphics.getColor()
+
+  -- 1. Gather valid decal sprites
+  local valid_names = {}
+  if player and player.deco then
+    for i = 1, #player.deco do
+      local name = player.deco[i].name
+      if name and _G[name] and _G[name].getWidth and not valid_names[name] then
+        valid_names[#valid_names + 1] = name
+        valid_names[name] = true
+      end
+    end
+  end
+
+  local fallbacks = { "kiaMask", "blood1", "blood2", "shell", "crater" }
+  for _, name in ipairs(fallbacks) do
+    if _G[name] and _G[name].getWidth and not valid_names[name] then
+      valid_names[#valid_names + 1] = name
+      valid_names[name] = true
+    end
+  end
+
+  if #valid_names == 0 then
+    if not _G["__bench_dummy_decal__"] then
+      local img_data = love.image.newImageData(16, 16)
+      img_data:mapPixel(function() return 0.8, 0.2, 0.2, 0.8 end)
+      _G["__bench_dummy_decal__"] = love.graphics.newImage(img_data)
+    end
+    valid_names[1] = "__bench_dummy_decal__"
+  end
+
+  -- 2. Generate synthetic decals across the active viewport
+  local sx = (player and player.screenx) or 0
+  local test_decos = {}
+  for i = 1, count do
+    test_decos[i] = {
+      name = valid_names[(i % #valid_names) + 1],
+      x = sx - 100 + ((i * 79) % 1480),
+      y = 30 + ((i * 43) % 660),
+      rotation = ((i * 17) % 360) * (math.pi / 180),
+      size = 6 + ((i * 11) % 12),
+      imunity = 0
+    }
+  end
+
+  local test_target = love.graphics.newCanvas(1280, 720)
+
+  -- 3. Benchmark Vanilla: Draw calls & render time
+  love.graphics.setCanvas(test_target)
+  local calls_before_vanilla = love.graphics.getStats().drawcalls
+  local t0 = love.timer.getTime()
+  for p = 1, passes do
+    love.graphics.clear(0, 0, 0, 0)
+    for n = 1, count do
+      local d = test_decos[n]
+      local img = _G[d.name]
+      if img then
+        local sc = (d.size or 10) / 10
+        local w, h = img:getWidth(), img:getHeight()
+        love.graphics.draw(img, d.x - sx, d.y, d.rotation or 0, sc, sc, w * 0.5, h * 0.5)
+      end
+    end
+  end
+  local vanilla_draw_ms = ((love.timer.getTime() - t0) * 1000) / passes
+  local vanilla_draw_calls = math.floor((love.graphics.getStats().drawcalls - calls_before_vanilla) / passes)
+
+  -- 4. Benchmark Baker: Bake Time
+  if not player then player = {} end
+  player.deco = test_decos
+
+  local t_bake0 = love.timer.getTime()
+  decal_baker.force_rebake()
+  decal_baker.sync()
+  local bake_time_ms = (love.timer.getTime() - t_bake0) * 1000
+
+  -- 5. Pixel Audit: Verify the canvas is actually holding painted pixels
+  local active_col = math.floor((sx + 640) / CHUNK_WIDTH)
+  local sampled_chunk = chunks[active_col] or chunks[0]
+  local painted_samples = 0
+  local total_samples = 0
+
+  if sampled_chunk then
+    local img_data = sampled_chunk:newImageData()
+    -- Sample a grid of 900 points across the canvas
+    for sample_x = 20, 1260, 42 do
+      for sample_y = 20, 700, 24 do
+        total_samples = total_samples + 1
+        local _, _, _, a = img_data:getPixel(sample_x, sample_y)
+        if a > 0.01 then
+          painted_samples = painted_samples + 1
+        end
+      end
+    end
+  end
+  local coverage_pct = total_samples > 0 and (painted_samples / total_samples * 100) or 0
+
+  -- 6. Benchmark Baker: Draw calls & blit time
+  local calls_before_baker = love.graphics.getStats().drawcalls
+  local t1 = love.timer.getTime()
+  for p = 1, passes do
+    love.graphics.clear(0, 0, 0, 0)
+    decal_baker.draw()
+  end
+  local baker_draw_ms = ((love.timer.getTime() - t1) * 1000) / passes
+  local baker_draw_calls = math.floor((love.graphics.getStats().drawcalls - calls_before_baker) / passes)
+
+  -- 7. Restore game state -- Comment this out if you want to keep the test decals after the benchmark just to see if the crazy metrics are real.
+  player.deco = orig_deco
+  decal_baker.clear_all()
+  if orig_deco and #orig_deco > 0 then
+    decal_baker.force_rebake()
+    decal_baker.sync()
+  end
+
+  love.graphics.setCanvas(orig_canvas)
+  love.graphics.setBlendMode(prev_blend, prev_alpha)
+  love.graphics.setColor(prev_r, prev_g, prev_b, prev_a)
+
+  local speedup = (baker_draw_ms > 0) and (vanilla_draw_ms / baker_draw_ms) or 0
+  local msg = string.format(
+    "[Decal Baker Benchmark] %d Decals | Calls: %d -> %d | Vanilla: %.3f ms | Baker: %.3f ms | Coverage: %.1f%% | Bake: %.3f ms",
+    count, vanilla_draw_calls, baker_draw_calls, vanilla_draw_ms, baker_draw_ms, coverage_pct, bake_time_ms
+  )
+  print(msg)
+
+  return baker_draw_ms, vanilla_draw_ms, speedup, bake_time_ms, count, coverage_pct, vanilla_draw_calls, baker_draw_calls
 end
 
 return decal_baker
