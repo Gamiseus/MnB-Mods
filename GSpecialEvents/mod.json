@@ -1,9 +1,32 @@
 {
+  "$schema": "../../Quartermaster/schemas/mod.schema.json",
+  "schema_version": 1,
   "id": "g_special_events",
   "name": "GSpecialEvents",
   "version": "1.0.0",
-  "description": "Special Events Manager & Overhaul — Selectable Classic Special Events, Modular Event Dispatcher, and Halloween MoonGrave 3-Way Zombie Combat with Infection Reanimation",
-  "author": "Mud and Blood Modding Team",
-  "priority": 80,
-  "dependencies": ["gmenu", "gcore"]
+  "game_version": ">=0.5.3",
+  "authors": [
+    "Mud and Blood Modding Team"
+  ],
+  "description": "Special Events Manager & Overhaul — Selectable Classic Special Events, Modular Event Dispatcher, and Halloween MoonGrave 3-Way Zombie Combat with Infection Reanimation.",
+  "category": "Gameplay",
+  "tags": [
+    "Events",
+    "Halloween",
+    "Classic",
+    "Gameplay"
+  ],
+  "load_priority": 30,
+  "entry_patch": "qm.toml",
+  "update_keys": [
+    "GitHub:Gamiseus/MnB-Mods#GSpecialEvents.zip"
+  ],
+  "relationships": {
+    "requires": {
+      "gcore": ">=1.0.0"
+    },
+    "load_after": [
+      "gcore"
+    ]
+  }
 }

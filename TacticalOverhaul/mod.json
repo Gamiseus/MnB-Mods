@@ -1,8 +1,10 @@
 {
+  "$schema": "../../Quartermaster/schemas/mod.schema.json",
+  "schema_version": 1,
   "id": "tactical_overhaul",
   "name": "Tactical Overhaul",
   "version": "1.0.0",
-  "game_version": ">=0.9.1",
+  "game_version": ">=0.5.3",
   "authors": [
     "Community Mod Team"
   ],
@@ -13,9 +15,17 @@
     "Tactics",
     "Squad"
   ],
-  "load_priority": 20,
+  "load_priority": 50,
   "entry_patch": "qm.toml",
-  "dependencies": {
-    "gcore": ">=1.0.0"
+  "update_keys": [
+    "GitHub:Gamiseus/MnB-Mods#TacticalOverhaul.zip"
+  ],
+  "relationships": {
+    "requires": {
+      "gcore": ">=1.0.0"
+    },
+    "load_after": [
+      "gcore"
+    ]
   }
 }

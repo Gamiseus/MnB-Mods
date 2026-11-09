@@ -1,0 +1,16 @@
+id = "gcore"
+name = "GCore"
+
+[[options]]
+id = "safe_destination"
+label = "Safer Destinations"
+type = "checkbox"
+default = true
+description = "Avoids sending soldiers to locations where they can't actually go"
+
+[[options]]
+id = "pathfinding"
+label = "Real Pathfinding"
+type = "checkbox"
+default = true
+description = "A* hazard & obstacle avoidance pathfinding for infantry and vehicles (Shift+F9 in-game overlay)"

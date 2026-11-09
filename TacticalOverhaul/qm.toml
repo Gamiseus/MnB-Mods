@@ -1,10 +1,11 @@
 [manifest]
 version = "1.0.0"
-priority = 20
+priority = 50
 
 # 1. Register smart move module
 [[patches]]
 [patches.module]
+id = "tactical_overhaul:main_lua:1"
 source = "smart_move.lua"
 before = "main.lua"
 name = "includes/smart_move"
@@ -12,6 +13,7 @@ name = "includes/smart_move"
 # 2. Main.lua: Require smart_move and initialize squad limit & smart move settings
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:main_lua:2"
 target = "main.lua"
 pattern = 'require "includes/directives"'
 position = "after"
@@ -76,6 +78,7 @@ match_indent = true
 # 3. Main.lua: Sync options to mnb3Tomnb2
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:main_lua:3"
 target = "main.lua"
 pattern = "mnb3Tomnb2_maxWave = player.maxWave"
 position = "after"
@@ -89,6 +92,7 @@ match_indent = true
 # 4. Main.lua: Smart squad movement on click (head)
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:main_lua:4"
 target = "main.lua"
 pattern = '''
         --if landed or within boat
@@ -157,6 +161,7 @@ match_indent = true
 # 5. Main.lua: Smart squad movement on click (close block)
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:main_lua:5"
 target = "main.lua"
 pattern = '''
             end   
@@ -173,6 +178,7 @@ match_indent = true
 # 6. Main.lua: Halt order (H key) combat reaction reset (non-conflicting anchor)
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:main_lua:6"
 target = "main.lua"
 pattern = "player.deployedTroops[i].targety = player.deployedTroops[i].y"
 position = "after"
@@ -189,6 +195,7 @@ match_indent = true
 # 7. AI.lua: Prepend combat reaction engine
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_ai_lua:7"
 target = "includes/ai.lua"
 pattern = "function infantryUpdate(dt)"
 position = "before"
@@ -743,6 +750,7 @@ match_indent = true
 # 8. AI.lua: Infantry update call combat check & tick stop timer
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_ai_lua:8"
 target = "includes/ai.lua"
 pattern = "player.deployedTroops[i].breathTimer = player.deployedTroops[i].breathTimer + dt"
 position = "after"
@@ -765,6 +773,7 @@ match_indent = true
 # 9. urb_engine.lua: Inject getEffectiveSquadLimit
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_urb_engine_lua:9"
 target = "includes/urb_engine.lua"
 pattern = "function squadSizer()"
 position = "before"
@@ -785,6 +794,7 @@ match_indent = true
 # 10. urb_engine.lua: Guard squad counter-assault trigger
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_urb_engine_lua:10"
 target = "includes/urb_engine.lua"
 pattern = '''
       if(player.mnb2SubGame ~= 8) then 
@@ -809,6 +819,7 @@ match_indent = true
 # 11. urb_engine.lua: Add click handlers for squad limit & smart move options
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_urb_engine_lua:11"
 target = "includes/urb_engine.lua"
 pattern = "function op_musicButton()"
 position = "before"
@@ -852,6 +863,7 @@ match_indent = true
 # 12. urb_engine.lua: Default options in newProfile
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_urb_engine_lua:12"
 target = "includes/urb_engine.lua"
 pattern = "player.borderLess = 0"
 position = "after"
@@ -865,6 +877,7 @@ match_indent = true
 # 13. urb_engine.lua: Default options in updateProfile
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_urb_engine_lua:13"
 target = "includes/urb_engine.lua"
 pattern = 'print("patching for 0.5.1")'
 position = "after"
@@ -880,6 +893,7 @@ match_indent = true
 # 14. urb_engine.lua: Sync options on menu_classicButton
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_urb_engine_lua:14"
 target = "includes/urb_engine.lua"
 pattern = "player.trenchModeRank = trenchRank"
 position = "after"
@@ -896,6 +910,7 @@ match_indent = true
 # 15. mnb2.lua: Crowd control limit guard
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_mnb2_lua:15"
 target = "includes/mnb2.lua"
 pattern = '''
   -- crowd control
@@ -914,6 +929,7 @@ match_indent = true
 # 16. mnb2.lua: sizeControl limit check
 [[patches]]
 [patches.pattern]
+id = "tactical_overhaul:includes_mnb2_lua:16"
 target = "includes/mnb2.lua"
 pattern = '''
 function sizeControl()

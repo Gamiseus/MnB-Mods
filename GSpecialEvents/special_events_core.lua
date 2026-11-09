@@ -122,8 +122,28 @@ end
 -- SELECTIVE MODULE LOADER & EVENT RESOLUTION
 -- ============================================================================
 
+function core.syncFromQM()
+  if QM and QM.settings and QM.settings.g_special_events then
+    local qs = QM.settings.g_special_events
+    if qs.event_select then core.settings.selectedEvent = qs.event_select end
+    local h = core.settings.halloween
+    if qs.halloween_3way_zombies ~= nil then h.zombiesAttackGermans = (qs.halloween_3way_zombies == true or qs.halloween_3way_zombies == 1) and 1 or 0 end
+    if qs.halloween_3way_germans ~= nil then h.germansAttackZombies = (qs.halloween_3way_germans == true or qs.halloween_3way_germans == 1) and 1 or 0 end
+    if qs.halloween_reanimation ~= nil then h.corpseReanimation = (qs.halloween_reanimation == true or qs.halloween_reanimation == 1) and 1 or 0 end
+    if qs.halloween_reanim_target then h.reanimationTarget = qs.halloween_reanim_target end
+    if qs.halloween_reanim_delay then h.reanimationDelay = tonumber(qs.halloween_reanim_delay) or h.reanimationDelay end
+    if qs.halloween_zombie_hp then h.zombieHealth = tonumber(qs.halloween_zombie_hp) or h.zombieHealth end
+    if qs.halloween_zombie_speed then h.zombieSpeedMult = tonumber(qs.halloween_zombie_speed) or h.zombieSpeedMult end
+    if qs.halloween_spawns then h.spawnDistribution = qs.halloween_spawns end
+    if qs.halloween_wave_freq then h.waveSpawnChance = tonumber(qs.halloween_wave_freq) or h.waveSpawnChance end
+    if qs.halloween_zombie_dmg then h.zombieClawsDamage = tonumber(qs.halloween_zombie_dmg) or h.zombieClawsDamage end
+    if qs.halloween_sound_death ~= nil then h.soundDeath = (qs.halloween_sound_death == true or qs.halloween_sound_death == 1) and 1 or 0 end
+  end
+end
+
 --- Determine effective event name based on setting and system calendar
 function core.resolveActiveEventName()
+  core.syncFromQM()
   local sel = core.settings.selectedEvent or "Auto"
   if sel == "None" then
     return ""
@@ -198,6 +218,7 @@ function core.setSelectedEvent(eventName)
 end
 
 function core.getSelectedEvent()
+  core.syncFromQM()
   return core.settings.selectedEvent or "Auto"
 end
 

@@ -1,6 +1,6 @@
 [manifest]
 version = "1.0.0"
-priority = 100
+priority = 5
 
 # =========================================================================
 # MODULE REGISTRATIONS
@@ -8,42 +8,49 @@ priority = 100
 
 [[patches]]
 [patches.module]
+id = "gcore:main_lua:1"
 source = "ser.lua"
 before = "main.lua"
 name = "includes/ser"
 
 [[patches]]
 [patches.module]
+id = "gcore:main_lua:2"
 source = "particlesSystem.lua"
 before = "main.lua"
 name = "includes/particlesSystem"
 
 [[patches]]
 [patches.module]
+id = "gcore:main_lua:3"
 source = "los_physics.lua"
 before = "main.lua"
 name = "includes/los_physics"
 
 [[patches]]
 [patches.module]
+id = "gcore:main_lua:4"
 source = "log_monitor.lua"
 before = "main.lua"
 name = "includes/log_monitor"
 
 [[patches]]
 [patches.module]
+id = "gcore:main_lua:5"
 source = "decal_baker.lua"
 before = "main.lua"
 name = "includes/decal_baker"
 
 [[patches]]
 [patches.module]
+id = "gcore:main_lua:6"
 source = "pathfinding.lua"
 before = "main.lua"
 name = "includes/pathfinding"
 
 [[patches]]
 [patches.module]
+id = "gcore:main_lua:7"
 source = "combined_benchmark.lua"
 before = "main.lua"
 name = "includes/combined_benchmark"
@@ -56,6 +63,7 @@ name = "includes/combined_benchmark"
 # Enable physics module
 [[patches]]
 [patches.pattern]
+id = "gcore:conf_lua:8"
 target = "conf.lua"
 pattern = "t.modules.physics = false          -- Enable the physics module (boolean)"
 position = "at"
@@ -65,6 +73,7 @@ match_indent = true
 # Enable thread module
 [[patches]]
 [patches.pattern]
+id = "gcore:conf_lua:9"
 target = "conf.lua"
 pattern = "t.modules.thread = false           -- Enable the thread module (boolean)"
 position = "at"
@@ -73,8 +82,9 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "gcore:conf_lua:10"
 target = "conf.lua"
-pattern = "t.window.vsync = true           -- Enable vertical sync (boolean)"
+pattern = "t.window.vsync = true*"
 position = "at"
 payload = "t.window.vsync = false           -- Enable vertical sync (boolean)"
 match_indent = true
@@ -86,6 +96,7 @@ match_indent = true
 # Module initialization & modSettings definition
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:11"
 target = "main.lua"
 pattern = 'require "includes/directives"'
 position = "after"
@@ -95,12 +106,15 @@ log_monitor = require "includes/log_monitor"
 decal_baker = require "includes/decal_baker"
 pathfinding = require "includes/pathfinding"
 
-modSettings = {
-  pathfindingEnabled = 1,
-  safeDestinationEnabled = 1
-}
+-- Other mods (TacticalOverhaul) share modSettings and wrap these functions. Their block may run
+-- before or after this one, so keep what is there and chain to any earlier definition.
+modSettings = modSettings or {}
+if modSettings.pathfindingEnabled == nil then modSettings.pathfindingEnabled = 1 end
+if modSettings.safeDestinationEnabled == nil then modSettings.safeDestinationEnabled = 1 end
 
+local _gcorePrevLoadModSettings = loadModSettings
 function loadModSettings()
+  if _gcorePrevLoadModSettings then _gcorePrevLoadModSettings() end
   if love and love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo("mod_settings.lua") then
     local ok, loaded = pcall(love.filesystem.load, "mod_settings.lua")
     if ok and type(loaded) == "function" then
@@ -117,14 +131,30 @@ function loadModSettings()
   end
 end
 
+local _gcorePrevSaveModSettings = saveModSettings
 function saveModSettings()
   if love and love.filesystem then
     local ser = require "includes/ser"
-    love.filesystem.write("mod_settings.lua", ser(modSettings))
+    -- Merge into what is on disk so settings of mods that are not loaded are kept.
+    local diskSettings = {}
+    if love.filesystem.getInfo and love.filesystem.getInfo("mod_settings.lua") then
+      local ok, loaded = pcall(love.filesystem.load, "mod_settings.lua")
+      if ok and type(loaded) == "function" then
+        local ok2, data = pcall(loaded)
+        if ok2 and type(data) == "table" then
+          for k, v in pairs(data) do diskSettings[k] = v end
+        end
+      end
+    end
+    for k, v in pairs(modSettings) do diskSettings[k] = v end
+    love.filesystem.write("mod_settings.lua", ser(diskSettings))
   end
   if player then
     player.option_pathfindingEnabled = modSettings.pathfindingEnabled
     player.option_safeDestinationEnabled = modSettings.safeDestinationEnabled
+  end
+  if _gcorePrevSaveModSettings and _gcorePrevSaveModSettings ~= saveModSettings then
+    _gcorePrevSaveModSettings()
   end
 end
 '''
@@ -133,6 +163,7 @@ match_indent = true
 # Load mod settings before setting volume
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:12"
 target = "main.lua"
 pattern = "setOptionVolume()"
 position = "before"
@@ -142,6 +173,7 @@ match_indent = true
 # Initialize modules on load
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:13"
 target = "main.lua"
 pattern = "function love.load()"
 position = "after"
@@ -156,20 +188,29 @@ match_indent = true
 # Update modules per frame
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:14"
 target = "main.lua"
-pattern = "if(pause == 0) then"
-position = "after"
+# love.update only: the next line pins the one `if(pause == 0) then` that runs the game loop.
+pattern = '''
+if(pause == 0) then
+runTime0(dt)
+'''
+position = "at"
+times = 1
 payload = '''
-        if los_physics then los_physics.updateFrame() end
-        if log_monitor then log_monitor.update(dt) end
-        if decal_baker then decal_baker.update(dt) end
-        if pathfinding then pathfinding.update(dt) end
+if(pause == 0) then
+  if los_physics then los_physics.updateFrame() end
+  if log_monitor then log_monitor.update(dt) end
+  if decal_baker then decal_baker.update(dt) end
+  if pathfinding then pathfinding.update(dt) end
+  runTime0(dt)
 '''
 match_indent = true
 
 # Sync options to Classic mode
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:15"
 target = "main.lua"
 pattern = "mnb3Tomnb2_maxWave = player.maxWave"
 position = "after"
@@ -182,6 +223,7 @@ match_indent = true
 # Clear pathfinding destination on Halt (H key)
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:16"
 target = "main.lua"
 pattern = '''
         player.deployedTroops[i].targetx = player.deployedTroops[i].x
@@ -201,6 +243,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:17"
 target = "main.lua"
 pattern = 'function love.load()'
 position = "before"
@@ -221,6 +264,7 @@ match_indent = true
 # - F10       : Toggle LOS Vision Overlay
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:18"
 target = "main.lua"
 pattern = '''
   if(key == "f4") then
@@ -299,6 +343,7 @@ match_indent = true
 # Ctrl+F9: Run Tactical LOS benchmark
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:19"
 target = "main.lua"
 pattern = 'if(key == "f9") then'
 position = "before"
@@ -319,6 +364,7 @@ match_indent = true
 # Shift+F9: Toggle NavGrid overlay
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:20"
 target = "main.lua"
 pattern = '''
   if(key == "f9") then
@@ -328,7 +374,10 @@ position = "at"
 payload = '''
   if(key == "f9") then
     local shiftDownF = love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")
-    if shiftDownF then
+    local ctrlDownF = love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")
+    if ctrlDownF then
+      -- Ctrl+F9 is the LOS benchmark, handled just before this block.
+    elseif shiftDownF then
       if pathfinding then
         pathfinding.debugOverlay = not pathfinding.debugOverlay
         local isOn = pathfinding.debugOverlay
@@ -348,6 +397,7 @@ match_indent = true
 # Close Shift guard for F9
 [[patches]]
 [patches.pattern]
+id = "gcore:main_lua:21"
 target = "main.lua"
 pattern = '''
       showTerrain = 0
@@ -378,6 +428,7 @@ match_indent = true
 # Infantry steering and collision resolution
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_ai_lua:22"
 target = "includes/ai.lua"
 pattern = '''
           if(randNbr(100)<30) then
@@ -431,6 +482,7 @@ match_indent = true
 # Vehicle steering target
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_ai_lua:23"
 target = "includes/ai.lua"
 pattern = "player.deployedVehicles[i].intendedRotation = math.atan2(player.deployedVehicles[i].y -(player.deployedVehicles[i].targety), player.deployedVehicles[i].x-(player.deployedVehicles[i].targetx)) + 1.5707"
 position = "at"
@@ -447,6 +499,7 @@ match_indent = true
 # Waypoint arrival threshold (tightens from 10px to 2px)
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_ai_lua:24"
 target = "includes/ai.lua"
 pattern = "if(distanceCheck(player.deployedTroops[i].x, player.deployedTroops[i].y, player.deployedTroops[i].targetx, player.deployedTroops[i].targety) >= 10 and player.deployedTroops[i].temporaryStop <= 0) then"
 position = "at"
@@ -460,6 +513,7 @@ match_indent = true
 # Wrap los() using Box2D physics raycast
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:25"
 target = "includes/urb_engine.lua"
 pattern = "function los(x1, x2, y1, y2)"
 position = "at"
@@ -478,6 +532,7 @@ match_indent = true
 # Wrap los2() using Box2D physics raycast
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:26"
 target = "includes/urb_engine.lua"
 pattern = "function los2(shooter, target)"
 position = "at"
@@ -496,6 +551,7 @@ match_indent = true
 # Invalidate hazards on mineDetect
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:27"
 target = "includes/urb_engine.lua"
 pattern = "checkCue(soldier.x, soldier.y, 33)"
 position = "after"
@@ -510,6 +566,7 @@ match_indent = true
 # Invalidate hazards on mineDisarm
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:28"
 target = "includes/urb_engine.lua"
 pattern = '''
               table.remove(player.mineField, i)
@@ -528,6 +585,7 @@ match_indent = true
 # Invalidate hazards on mineGrab
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:29"
 target = "includes/urb_engine.lua"
 pattern = '''
                 applyLoot(soldier, "HEMine")
@@ -550,6 +608,7 @@ match_indent = true
 # Invalidate hazards on reconReveal
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:30"
 target = "includes/urb_engine.lua"
 pattern = '''
   end
@@ -570,6 +629,7 @@ match_indent = true
 # Trigger Decal Baker clean on broomerButton
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:31"
 target = "includes/urb_engine.lua"
 pattern = '''
 function broomerButton()
@@ -586,6 +646,7 @@ match_indent = true
 # Prune excess decals when changing max decals option
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:32"
 target = "includes/urb_engine.lua"
 pattern = '''
 function op_decal1Button()
@@ -632,6 +693,7 @@ match_indent = true
 # Mod option button click handlers
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:33"
 target = "includes/urb_engine.lua"
 pattern = "function op_musicButton()"
 position = "before"
@@ -657,6 +719,7 @@ match_indent = true
 # Default options in newProfile
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:34"
 target = "includes/urb_engine.lua"
 pattern = "player.borderLess = 0"
 position = "after"
@@ -669,6 +732,7 @@ match_indent = true
 # Default options in updateProfile
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:35"
 target = "includes/urb_engine.lua"
 pattern = 'print("patching for 0.5.1")'
 position = "after"
@@ -685,6 +749,7 @@ match_indent = true
 # Sync options on menu_classicButton
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_urb_engine_lua:36"
 target = "includes/urb_engine.lua"
 pattern = "player.trenchModeRank = trenchRank"
 position = "after"
@@ -704,6 +769,7 @@ match_indent = true
 # Combined debug overlays (LOS and NavGrid)
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_drawfiles_lua:37"
 target = "includes/drawFiles.lua"
 pattern = "--cues"
 position = "before"
@@ -720,6 +786,7 @@ match_indent = true
 # Decal Baker canvas rendering
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_drawfiles_lua:38"
 target = "includes/drawFiles.lua"
 pattern = '''
   for n=1, #player.deco, 1 do
@@ -741,6 +808,7 @@ match_indent = true
 # Replace un-culled particle drawing with frustum culling, color caching, and null safety
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_drawfiles_lua:39"
 target = "includes/drawFiles.lua"
 pattern = '''
   for i=1, #player.particles, 1 do
@@ -794,6 +862,7 @@ match_indent = true
 # Replace un-culled topParticles drawing with frustum culling & color caching
 [[patches]]
 [patches.pattern]
+id = "gcore:includes_drawfiles_lua:40"
 target = "includes/drawFiles.lua"
 pattern = '''
   if(#player.topParticles > 0) then

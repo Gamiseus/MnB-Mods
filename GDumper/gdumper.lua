@@ -134,4 +134,12 @@ function GDumper.init()
   end
 end
 
+function GDumper.dumpLua()
+  GDumper.dump("lua")
+end
+
+function GDumper.dumpAssets()
+  GDumper.dump("assets")
+end
+
 return GDumper

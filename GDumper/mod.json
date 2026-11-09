@@ -1,8 +1,10 @@
 {
+  "$schema": "../../Quartermaster/schemas/mod.schema.json",
+  "schema_version": 1,
   "id": "g_dumper",
   "name": "GDumper",
   "version": "1.0.0",
-  "game_version": ">=0.9.1",
+  "game_version": ">=0.5.3",
   "authors": [
     "Mud and Blood Modding Team"
   ],
@@ -13,6 +15,14 @@
     "Tools",
     "Dumping"
   ],
-  "load_priority": 60,
-  "entry_patch": "qm.toml"
+  "load_priority": 90,
+  "entry_patch": "qm.toml",
+  "update_keys": [
+    "GitHub:Gamiseus/MnB-Mods#GDumper.zip"
+  ],
+  "relationships": {
+    "load_after": [
+      "gcore"
+    ]
+  }
 }

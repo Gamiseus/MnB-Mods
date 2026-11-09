@@ -1,6 +1,6 @@
 [manifest]
 version = "1.0.0"
-priority = 80
+priority = 30
 
 # ============================================================================
 # MODULE REGISTRATIONS
@@ -8,30 +8,35 @@ priority = 80
 
 [[patches]]
 [patches.module]
+id = "g_special_events:main_lua:1"
 source = "special_events_core.lua"
 before = "main.lua"
 name = "includes/special_events_core"
 
 [[patches]]
 [patches.module]
+id = "g_special_events:main_lua:2"
 source = "events/halloween.lua"
 before = "main.lua"
 name = "events/halloween"
 
 [[patches]]
 [patches.module]
+id = "g_special_events:main_lua:3"
 source = "events/xmas.lua"
 before = "main.lua"
 name = "events/xmas"
 
 [[patches]]
 [patches.module]
+id = "g_special_events:main_lua:4"
 source = "events/remembrance.lua"
 before = "main.lua"
 name = "events/remembrance"
 
 [[patches]]
 [patches.module]
+id = "g_special_events:main_lua:5"
 source = "events/general.lua"
 before = "main.lua"
 name = "events/general"
@@ -42,6 +47,7 @@ name = "events/general"
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:main_lua:6"
 target = "main.lua"
 pattern = 'require "includes/directives"'
 position = "after"
@@ -52,6 +58,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:main_lua:7"
 target = "main.lua"
 pattern = '''
   SPECIAL_EVENTS = {"Brest","HoG","Aachen","Cologne"}
@@ -67,6 +74,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:main_lua:8"
 target = "main.lua"
 pattern = "function specialEventForDate(floats)"
 position = "after"
@@ -91,6 +99,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_urb_engine_lua:9"
 target = "includes/urb_engine.lua"
 pattern = "function enemySomewhere(dude)"
 position = "before"
@@ -107,6 +116,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_urb_engine_lua:10"
 target = "includes/urb_engine.lua"
 pattern = '''
 function enemySomewhere(dude)
@@ -136,6 +146,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_urb_engine_lua:11"
 target = "includes/urb_engine.lua"
 pattern = "function spawnZombies(amount)"
 position = "after"
@@ -148,9 +159,35 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_urb_engine_lua:12"
+# onDeath once per death: death() sets dude.dead = 1 twice in one block (first, then again
+# after dropLoot), so anchor on the first one only, which is followed by dude.onFire = 0.
 target = "includes/urb_engine.lua"
-pattern = "      dude.dead = 1"
+pattern = '''
+dude.dead = 1
+dude.onFire = 0
+'''
 position = "after"
+times = 1
+payload = '''
+      if SpecialEvents and SpecialEvents.onDeath then
+        SpecialEvents.onDeath(dude)
+      end
+'''
+match_indent = true
+
+# onDeath for gibbed soldiers: gib() and gibSanta() set dude.dead = 1 themselves, then
+# dude.health = 0, and death() skips them afterwards.
+[[patches]]
+[patches.pattern]
+id = "g_special_events:on_death_gib"
+target = "includes/urb_engine.lua"
+pattern = '''
+dude.dead = 1
+dude.health = 0
+'''
+position = "after"
+times = 2
 payload = '''
       if SpecialEvents and SpecialEvents.onDeath then
         SpecialEvents.onDeath(dude)
@@ -160,6 +197,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_urb_engine_lua:13"
 target = "includes/urb_engine.lua"
 pattern = "      local damage = randNbr(attacker.hthDamage)"
 position = "after"
@@ -176,6 +214,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_ai_lua:14"
 target = "includes/ai.lua"
 pattern = "if(player.deployedTroops[u].faction ~= soldier.faction and player.deployedTroops[u].health > 10) then"
 position = "at"
@@ -184,6 +223,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_ai_lua:15"
 target = "includes/ai.lua"
 pattern = "if target.faction ~= soldier.faction and target.health > 10 then"
 position = "at"
@@ -192,6 +232,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_ai_lua:16"
 target = "includes/ai.lua"
 pattern = "if(player.deployedTroops[u].faction ~= player.deployedVehicles[i].faction and player.deployedTroops[u].health > 10) then"
 position = "at"
@@ -200,6 +241,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_ai_lua:17"
 target = "includes/ai.lua"
 pattern = '''
                 if(soldier.tag == "zombie") then 
@@ -222,6 +264,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_ai_lua:18"
 target = "includes/ai.lua"
 pattern = '''
           local currentSpeed = player.deployedTroops[i].speed
@@ -247,6 +290,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_mnb2_lua:19"
 target = "includes/mnb2.lua"
 pattern = '''
   if(specialEvent == "Halloween" and player.mnb2SubGame == 99) then 
@@ -272,6 +316,7 @@ match_indent = true
 
 [[patches]]
 [patches.pattern]
+id = "g_special_events:includes_drawfiles_lua:20"
 target = "includes/drawFiles.lua"
 pattern = '''
   infantryUpdate(dt)
