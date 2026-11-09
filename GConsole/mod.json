@@ -1,17 +1,28 @@
 {
+  "$schema": "../../Quartermaster/schemas/mod.schema.json",
+  "schema_version": 1,
   "id": "gconsole",
   "name": "Developer Console & Debug Suite",
   "version": "1.0.0",
-  "game_version": ">=0.9.1",
+  "game_version": ">=0.5.3",
   "authors": [
-    "Community Mod Team"
+    "NexusMods Contributor"
   ],
-  "description": "Windows debug console attachment, F1-F8 developer hotkeys, and real-time overlays.",
+  "description": "Windows debug console attachment, F1-F8 developer hotkeys, and real-time overlays. Found on Nexus Mods.",
   "category": "Dev",
   "tags": [
     "Debug",
     "Console"
   ],
-  "load_priority": 50,
-  "entry_patch": "qm.toml"
+  "load_priority": 80,
+  "entry_patch": "qm.toml",
+  "homepage": "https://www.nexusmods.com/mudandblood",
+  "update_keys": [
+    "Nexus:mudandblood:console"
+  ],
+  "relationships": {
+    "load_after": [
+      "gcore"
+    ]
+  }
 }
