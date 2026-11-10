@@ -9,6 +9,7 @@ options = [6, 8, 10, 12, 16, 24, 32, "OFF"]
 labels = ["6", "8", "10", "12", "16", "24", "32", "OFF"]
 default = 6
 description = "Exposed soldier threshold before German counter-assault waves trigger (Default: 6)"
+aliases = ["squadLimitThreshold"]
 
 [[options]]
 id = "smart_move"
@@ -16,3 +17,4 @@ label = "Smart Squad Move"
 type = "checkbox"
 default = true
 description = "Weighted cover distribution, overwatch spacing, and medic placement on squad move orders"
+aliases = ["smartMoveEnabled"]

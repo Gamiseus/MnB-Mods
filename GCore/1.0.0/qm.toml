@@ -93,7 +93,7 @@ match_indent = true
 # APPLICATION LIFECYCLE & SETTINGS (main.lua)
 # =========================================================================
 
-# Module initialization & modSettings definition
+# Module initialization
 [[patches]]
 [patches.pattern]
 id = "gcore:main_lua:11"
@@ -105,69 +105,7 @@ los_physics = require "includes/los_physics"
 log_monitor = require "includes/log_monitor"
 decal_baker = require "includes/decal_baker"
 pathfinding = require "includes/pathfinding"
-
--- Other mods (TacticalOverhaul) share modSettings and wrap these functions. Their block may run
--- before or after this one, so keep what is there and chain to any earlier definition.
-modSettings = modSettings or {}
-if modSettings.pathfindingEnabled == nil then modSettings.pathfindingEnabled = 1 end
-if modSettings.safeDestinationEnabled == nil then modSettings.safeDestinationEnabled = 1 end
-
-local _gcorePrevLoadModSettings = loadModSettings
-function loadModSettings()
-  if _gcorePrevLoadModSettings then _gcorePrevLoadModSettings() end
-  if love and love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo("mod_settings.lua") then
-    local ok, loaded = pcall(love.filesystem.load, "mod_settings.lua")
-    if ok and type(loaded) == "function" then
-      local ok2, data = pcall(loaded)
-      if ok2 and type(data) == "table" then
-        if data.pathfindingEnabled ~= nil then modSettings.pathfindingEnabled = data.pathfindingEnabled end
-        if data.safeDestinationEnabled ~= nil then modSettings.safeDestinationEnabled = data.safeDestinationEnabled end
-      end
-    end
-  end
-  if player then
-    player.option_pathfindingEnabled = modSettings.pathfindingEnabled
-    player.option_safeDestinationEnabled = modSettings.safeDestinationEnabled
-  end
-end
-
-local _gcorePrevSaveModSettings = saveModSettings
-function saveModSettings()
-  if love and love.filesystem then
-    local ser = require "includes/ser"
-    -- Merge into what is on disk so settings of mods that are not loaded are kept.
-    local diskSettings = {}
-    if love.filesystem.getInfo and love.filesystem.getInfo("mod_settings.lua") then
-      local ok, loaded = pcall(love.filesystem.load, "mod_settings.lua")
-      if ok and type(loaded) == "function" then
-        local ok2, data = pcall(loaded)
-        if ok2 and type(data) == "table" then
-          for k, v in pairs(data) do diskSettings[k] = v end
-        end
-      end
-    end
-    for k, v in pairs(modSettings) do diskSettings[k] = v end
-    love.filesystem.write("mod_settings.lua", ser(diskSettings))
-  end
-  if player then
-    player.option_pathfindingEnabled = modSettings.pathfindingEnabled
-    player.option_safeDestinationEnabled = modSettings.safeDestinationEnabled
-  end
-  if _gcorePrevSaveModSettings and _gcorePrevSaveModSettings ~= saveModSettings then
-    _gcorePrevSaveModSettings()
-  end
-end
 '''
-match_indent = true
-
-# Load mod settings before setting volume
-[[patches]]
-[patches.pattern]
-id = "gcore:main_lua:12"
-target = "main.lua"
-pattern = "setOptionVolume()"
-position = "before"
-payload = "  loadModSettings()"
 match_indent = true
 
 # Initialize modules on load
@@ -204,19 +142,6 @@ if(pause == 0) then
   if decal_baker then decal_baker.update(dt) end
   if pathfinding then pathfinding.update(dt) end
   runTime0(dt)
-'''
-match_indent = true
-
-# Sync options to Classic mode
-[[patches]]
-[patches.pattern]
-id = "gcore:main_lua:15"
-target = "main.lua"
-pattern = "mnb3Tomnb2_maxWave = player.maxWave"
-position = "after"
-payload = '''
-  mnb3Tomnb2_pathfindingEnabled = player.option_pathfindingEnabled
-  mnb3Tomnb2_safeDestinationEnabled = player.option_safeDestinationEnabled
 '''
 match_indent = true
 
@@ -687,78 +612,6 @@ function op_decal5Button()
   player.option_maxDecals = 5
   if decal_baker then decal_baker.clean_excess() end
 end
-'''
-match_indent = true
-
-# Mod option button click handlers
-[[patches]]
-[patches.pattern]
-id = "gcore:includes_urb_engine_lua:33"
-target = "includes/urb_engine.lua"
-pattern = "function op_musicButton()"
-position = "before"
-payload = '''
-function op_pathfindingButton()
-  local cur = (modSettings and modSettings.pathfindingEnabled) or (player and player.option_pathfindingEnabled) or 1
-  local nVal = (cur == 0) and 1 or 0
-  if modSettings then modSettings.pathfindingEnabled = nVal end
-  if player then player.option_pathfindingEnabled = nVal end
-  if saveModSettings then saveModSettings() end
-end
-
-function op_safeDestinationButton()
-  local cur = (modSettings and modSettings.safeDestinationEnabled) or (player and player.option_safeDestinationEnabled) or 1
-  local nVal = (cur == 0) and 1 or 0
-  if modSettings then modSettings.safeDestinationEnabled = nVal end
-  if player then player.option_safeDestinationEnabled = nVal end
-  if saveModSettings then saveModSettings() end
-end
-'''
-match_indent = true
-
-# Default options in newProfile
-[[patches]]
-[patches.pattern]
-id = "gcore:includes_urb_engine_lua:34"
-target = "includes/urb_engine.lua"
-pattern = "player.borderLess = 0"
-position = "after"
-payload = '''
-  player.option_pathfindingEnabled = 1
-  player.option_safeDestinationEnabled = 1
-'''
-match_indent = true
-
-# Default options in updateProfile
-[[patches]]
-[patches.pattern]
-id = "gcore:includes_urb_engine_lua:35"
-target = "includes/urb_engine.lua"
-pattern = 'print("patching for 0.5.1")'
-position = "after"
-payload = '''
-  if(player.option_pathfindingEnabled == nil) then
-    player.option_pathfindingEnabled = 1
-  end
-  if(player.option_safeDestinationEnabled == nil) then
-    player.option_safeDestinationEnabled = 1
-  end
-'''
-match_indent = true
-
-# Sync options on menu_classicButton
-[[patches]]
-[patches.pattern]
-id = "gcore:includes_urb_engine_lua:36"
-target = "includes/urb_engine.lua"
-pattern = "player.trenchModeRank = trenchRank"
-position = "after"
-payload = '''
-  if loadModSettings then loadModSettings() end
-  if modSettings then
-    player.option_pathfindingEnabled = modSettings.pathfindingEnabled
-    player.option_safeDestinationEnabled = modSettings.safeDestinationEnabled
-  end
 '''
 match_indent = true
 
