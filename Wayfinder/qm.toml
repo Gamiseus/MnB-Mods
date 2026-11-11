@@ -1,0 +1,257 @@
+[manifest]
+version = "1.0.0"
+priority = 20
+
+[publish]
+repository = "Gamiseus/MnB-Mods"
+asset = "Wayfinder.zip"
+
+# --- Module and engine setup ----------------------------------------------
+
+[[patches]]
+[patches.module]
+id = "wayfinder:module"
+source = "pathfinding.lua"
+before = "main.lua"
+name = "includes/pathfinding"
+
+[[patches]]
+[patches.module]
+id = "wayfinder:module_actions"
+source = "wayfinder.lua"
+before = "main.lua"
+name = "includes/wayfinder"
+
+# The path solver runs on a LÖVE thread.
+[[patches]]
+[patches.pattern]
+id = "wayfinder:conf_thread"
+target = "conf.lua"
+pattern = "t.modules.thread = false           -- Enable the thread module (boolean)"
+position = "at"
+payload = "t.modules.thread = true            -- Enable the thread module (boolean)"
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "wayfinder:require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+pathfinding = require "includes/pathfinding"
+Wayfinder = require "includes/wayfinder"
+'''
+
+# Collect solved paths and keep the grid current, once per frame.
+[[patches]]
+[patches.pattern]
+id = "wayfinder:update"
+target = "main.lua"
+# love.update only: the next line pins the one `if(pause == 0) then` that runs the game loop.
+pattern = '''
+if(pause == 0) then
+runTime0(dt)
+'''
+position = "at"
+times = 1
+payload = '''
+if(pause == 0) then
+  pathfinding.update(dt)
+  runTime0(dt)
+'''
+match_indent = true
+apply_as = "edits"
+
+# Stop the worker thread, or the game can hang on exit.
+[[patches]]
+[patches.pattern]
+id = "wayfinder:quit"
+target = "main.lua"
+pattern = "function love.quit()"
+position = "after"
+times = 1
+payload = '''
+  if pathfinding and pathfinding.shutdown then pathfinding.shutdown() end
+'''
+match_indent = true
+
+# --- Orders ----------------------------------------------------------------
+
+# Halt (H) also drops the path.
+[[patches]]
+[patches.pattern]
+id = "wayfinder:halt"
+target = "main.lua"
+pattern = '''
+        player.deployedTroops[i].targetx = player.deployedTroops[i].x
+        player.deployedTroops[i].targety = player.deployedTroops[i].y
+        if(spamTimer <= 0) then 
+'''
+position = "at"
+payload = '''
+        player.deployedTroops[i].targetx = player.deployedTroops[i].x
+        player.deployedTroops[i].targety = player.deployedTroops[i].y
+        player.deployedTroops[i]._pfGoalX = nil
+        if(spamTimer <= 0) then 
+'''
+match_indent = true
+apply_as = "edits"
+
+# --- Movement (includes/ai.lua) ---------------------------------------------
+
+# Infantry steer at the next waypoint instead of the destination, and slide along obstacles.
+[[patches]]
+[patches.pattern]
+id = "wayfinder:infantry_steering"
+target = "includes/ai.lua"
+pattern = '''
+          if(randNbr(100)<30) then
+           -- -- print("creajusting angle for "..player.deployedTroops[i].name)
+            if(player.deployedTroops[i].targety) then 
+              player.deployedTroops[i].rotation = math.atan2(player.deployedTroops[i].y -(player.deployedTroops[i].targety), player.deployedTroops[i].x-(player.deployedTroops[i].targetx)) + 1.5707
+            else
+              floatyText(player.deployedTroops[i], "debug:Invalid targety detected on this soldier. \n (reassigning)")
+              player.deployedTroops[i].targetx = player.deployedTroops[i].x
+              player.deployedTroops[i].targety = player.deployedTroops[i].y
+            end
+          end
+          player.deployedTroops[i].x = player.deployedTroops[i].x - math.sin(player.deployedTroops[i].rotation) * currentSpeed * dt
+          player.deployedTroops[i].y = player.deployedTroops[i].y + math.cos(player.deployedTroops[i].rotation) * currentSpeed * dt
+'''
+position = "at"
+payload = '''
+          local steerX = player.deployedTroops[i].targetx
+          local steerY = player.deployedTroops[i].targety
+          local snapTurn = false
+          if(pathfinding ~= nil and player.deployedTroops[i].onFire == 0 and (player.landed == nil or player.landed == 1)) then
+            steerX, steerY, snapTurn = pathfinding.getSteeringTarget(player.deployedTroops[i], dt)
+          end
+          if(snapTurn or randNbr(100)<30) then
+           -- -- print("creajusting angle for "..player.deployedTroops[i].name)
+            if(player.deployedTroops[i].targety and steerY and steerX) then 
+              player.deployedTroops[i].rotation = math.atan2(player.deployedTroops[i].y -(steerY), player.deployedTroops[i].x-(steerX)) + 1.5707
+            else
+              floatyText(player.deployedTroops[i], "debug:Invalid targety detected on this soldier. \n (reassigning)")
+              player.deployedTroops[i].targetx = player.deployedTroops[i].x
+              player.deployedTroops[i].targety = player.deployedTroops[i].y
+            end
+          end
+          local prevX = player.deployedTroops[i].x
+          local prevY = player.deployedTroops[i].y
+          local distToGoal = math.sqrt((player.deployedTroops[i].x - player.deployedTroops[i].targetx)^2 + (player.deployedTroops[i].y - player.deployedTroops[i].targety)^2)
+          local step = currentSpeed * dt
+          if (steerX == player.deployedTroops[i].targetx and steerY == player.deployedTroops[i].targety and distToGoal <= (step + 2.5)) then
+            player.deployedTroops[i].x = player.deployedTroops[i].targetx
+            player.deployedTroops[i].y = player.deployedTroops[i].targety
+          else
+            player.deployedTroops[i].x = player.deployedTroops[i].x - math.sin(player.deployedTroops[i].rotation) * step
+            player.deployedTroops[i].y = player.deployedTroops[i].y + math.cos(player.deployedTroops[i].rotation) * step
+          end
+          if(pathfinding ~= nil and player.deployedTroops[i].onFire == 0 and (player.landed == nil or player.landed == 1)) then
+            pathfinding.resolveObstacleCollision(player.deployedTroops[i], prevX, prevY)
+          end
+'''
+match_indent = true
+
+# Vehicles steer at the next waypoint.
+[[patches]]
+[patches.pattern]
+id = "wayfinder:vehicle_steering"
+target = "includes/ai.lua"
+pattern = "player.deployedVehicles[i].intendedRotation = math.atan2(player.deployedVehicles[i].y -(player.deployedVehicles[i].targety), player.deployedVehicles[i].x-(player.deployedVehicles[i].targetx)) + 1.5707"
+position = "at"
+payload = '''
+          local vSteerX = player.deployedVehicles[i].targetx
+          local vSteerY = player.deployedVehicles[i].targety
+          if(pathfinding ~= nil and player.deployedVehicles[i].sideRoller <= 0) then
+            vSteerX, vSteerY = pathfinding.getSteeringTarget(player.deployedVehicles[i], dt)
+          end
+          player.deployedVehicles[i].intendedRotation = math.atan2(player.deployedVehicles[i].y -(vSteerY), player.deployedVehicles[i].x-(vSteerX)) + 1.5707
+'''
+match_indent = true
+
+# Arrive within 2 px instead of 10, so waypoints are followed closely.
+[[patches]]
+[patches.pattern]
+id = "wayfinder:arrival"
+target = "includes/ai.lua"
+pattern = "if(distanceCheck(player.deployedTroops[i].x, player.deployedTroops[i].y, player.deployedTroops[i].targetx, player.deployedTroops[i].targety) >= 10 and player.deployedTroops[i].temporaryStop <= 0) then"
+position = "at"
+payload = "if(distanceCheck(player.deployedTroops[i].x, player.deployedTroops[i].y, player.deployedTroops[i].targetx, player.deployedTroops[i].targety) >= 2 and player.deployedTroops[i].temporaryStop <= 0) then"
+match_indent = true
+
+# --- Hazards changed: paths are solved again (includes/urb_engine.lua) -------
+
+[[patches]]
+[patches.pattern]
+id = "wayfinder:mine_detected"
+target = "includes/urb_engine.lua"
+pattern = "checkCue(soldier.x, soldier.y, 33)"
+position = "after"
+payload = '''
+            mine.flagged = 1
+            if pathfinding and pathfinding.invalidateHazards then
+              pathfinding.invalidateHazards()
+            end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "wayfinder:mine_disarmed"
+target = "includes/urb_engine.lua"
+pattern = '''
+              table.remove(player.mineField, i)
+              if(soldier.faction == "allied") then 
+'''
+position = "at"
+times = 1
+payload = '''
+              table.remove(player.mineField, i)
+              if pathfinding then pathfinding.invalidateHazards() end
+              if(soldier.faction == "allied") then 
+'''
+match_indent = true
+apply_as = "edits"
+
+[[patches]]
+[patches.pattern]
+id = "wayfinder:mine_grabbed"
+target = "includes/urb_engine.lua"
+pattern = '''
+                applyLoot(soldier, "HEMine")
+                floatyText(mine, mineGrabbedTxt)
+                table.remove(player.mineField, i)
+'''
+position = "after"
+times = 1
+payload = '''
+                if pathfinding then pathfinding.invalidateHazards() end
+'''
+match_indent = true
+
+# Two functions reveal hidden things this way; both solve paths again.
+[[patches]]
+[patches.pattern]
+id = "wayfinder:recon_reveal"
+target = "includes/urb_engine.lua"
+pattern = "-- check for hidden loot"
+position = "before"
+times = 2
+payload = '''
+  if cleared == 1 and pathfinding then pathfinding.invalidateHazards() end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "wayfinder:overlay"
+target = "includes/drawFiles.lua"
+pattern = "--cues"
+position = "before"
+times = 1
+payload = '''
+    pathfinding.drawDebug()
+'''
+match_indent = true

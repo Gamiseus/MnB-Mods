@@ -1,0 +1,21 @@
+{
+  "$schema": "../../Quartermaster/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "save_guard",
+  "name": "SaveGuard",
+  "version": "1.0.0",
+  "game_version": ">=0.5.3",
+  "authors": [
+    "Gamiseus"
+  ],
+  "description": "Keeps saves small and loadable in very long battles: particles, floating text and combat litter are left out of save files. Fixes the 'main function has more than 65536 constants' crash on load.",
+  "category": "Core",
+  "tags": [
+    "Saves",
+    "Stability"
+  ],
+  "load_priority": 10,
+  "update_keys": [
+    "GitHub:Gamiseus/MnB-Mods#SaveGuard.zip"
+  ]
+}

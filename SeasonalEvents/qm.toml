@@ -1,0 +1,237 @@
+[manifest]
+version = "2.0.0"
+priority = 30
+
+[publish]
+repository = "Gamiseus/MnB-Mods"
+asset = "SeasonalEvents.zip"
+
+# --- Modules ----------------------------------------------------------------
+
+[[patches]]
+[patches.module]
+id = "seasonal_events:module_core"
+source = "seasonal_events.lua"
+before = "main.lua"
+name = "includes/seasonal_events"
+
+[[patches]]
+[patches.module]
+id = "seasonal_events:module_halloween"
+source = "events/halloween.lua"
+before = "main.lua"
+name = "events/halloween"
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'SpecialEvents = require "includes/seasonal_events"'
+
+# --- Which event is on (main.lua) ---------------------------------------------
+
+# The game picks its event by the calendar. Right after, the player's choice is applied.
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:init"
+target = "main.lua"
+pattern = '''
+  SPECIAL_EVENTS = {"Brest","HoG","Aachen","Cologne"}
+  specialEventForDate(SPECIAL_EVENTS)
+'''
+position = "after"
+times = 1
+payload = '''
+  SpecialEvents.init()
+'''
+match_indent = true
+
+# Later calls of the calendar function return the choice as well.
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:calendar"
+target = "main.lua"
+pattern = "function specialEventForDate(floats)"
+position = "after"
+times = 1
+payload = '''
+  local chosenEvent = SpecialEvents.override()
+  if chosenEvent then
+    specialEvent = chosenEvent
+    return chosenEvent
+  end
+'''
+match_indent = true
+
+# --- Who fights whom ---------------------------------------------------------
+# The game asks "is it the other faction?" in four places. Each asks the event instead.
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:hostile_enemy_somewhere"
+target = "includes/urb_engine.lua"
+pattern = "    if(player.deployedTroops[i].faction ~= dude.faction and player.deployedTroops[i].health > 10 and distanceCheck2(dude, player.deployedTroops[i]) < 1000 and player.deployedTroops[i].id ~= dude.id) then"
+position = "at"
+times = 1
+payload = "    if(player.deployedTroops[i].health > 10 and isHostileTo(dude, player.deployedTroops[i]) and distanceCheck2(dude, player.deployedTroops[i]) < 1000) then"
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:hostile_infantry_target"
+target = "includes/ai.lua"
+pattern = "if(player.deployedTroops[u].faction ~= soldier.faction and player.deployedTroops[u].health > 10) then"
+position = "at"
+payload = "if(player.deployedTroops[u].health > 10 and isHostileTo(soldier, player.deployedTroops[u])) then"
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:hostile_target"
+target = "includes/ai.lua"
+pattern = "if target.faction ~= soldier.faction and target.health > 10 then"
+position = "at"
+payload = "if target.health > 10 and isHostileTo(soldier, target) then"
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:hostile_vehicle_target"
+target = "includes/ai.lua"
+pattern = "if(player.deployedTroops[u].faction ~= player.deployedVehicles[i].faction and player.deployedTroops[u].health > 10) then"
+position = "at"
+payload = "if(player.deployedTroops[u].health > 10 and isHostileTo(player.deployedVehicles[i], player.deployedTroops[u])) then"
+match_indent = true
+
+# --- Event hooks -------------------------------------------------------------
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:update"
+target = "includes/drawFiles.lua"
+pattern = '''
+  infantryUpdate(dt)
+  neutralsUpdate(dt)
+'''
+position = "at"
+times = 1
+payload = '''
+  infantryUpdate(dt)
+  SpecialEvents.onUpdate(dt)
+  neutralsUpdate(dt)
+'''
+match_indent = true
+apply_as = "edits"
+
+# death() sets dude.dead = 1 twice in one block; the first is followed by dude.onFire = 0.
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:death"
+target = "includes/urb_engine.lua"
+pattern = '''
+dude.dead = 1
+dude.onFire = 0
+'''
+position = "after"
+times = 1
+payload = '''
+      SpecialEvents.onDeath(dude)
+'''
+match_indent = true
+
+# gib() and gibSanta() mark the soldier dead themselves, and death() then skips them.
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:death_gibbed"
+target = "includes/urb_engine.lua"
+pattern = '''
+dude.dead = 1
+dude.health = 0
+'''
+position = "after"
+times = 2
+payload = '''
+      SpecialEvents.onDeath(dude)
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:cqc_hit"
+target = "includes/urb_engine.lua"
+pattern = "      local damage = randNbr(attacker.hthDamage)"
+position = "after"
+payload = '''
+      SpecialEvents.onCqcHit(attacker, defender, damage)
+'''
+match_indent = true
+
+# --- Zombies -----------------------------------------------------------------
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:spawn_zombies"
+target = "includes/urb_engine.lua"
+pattern = "function spawnZombies(amount)"
+position = "after"
+times = 1
+payload = '''
+  if SpecialEvents.onSpawnZombies(amount) then return end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:zombie_idle"
+target = "includes/ai.lua"
+pattern = '''
+                  if(enemySomewhere(soldier) <= 0) then
+                    soldier.targetx = alliedFrontLine()
+                  end
+'''
+position = "at"
+times = 1
+payload = '''
+                  if(enemySomewhere(soldier) <= 0 and not SpecialEvents.onZombieIdle(soldier)) then
+                    soldier.targetx = alliedFrontLine()
+                  end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:zombie_speed"
+target = "includes/ai.lua"
+pattern = '''
+          local currentSpeed = player.deployedTroops[i].speed
+          if(player.deployedTroops[i].weapon ~= nil) then
+            currentSpeed = player.deployedTroops[i].speed  - player.deployedTroops[i].weapon.bulk
+          end
+'''
+position = "at"
+times = 1
+payload = '''
+          local currentSpeed = player.deployedTroops[i].speed
+          if(player.deployedTroops[i].tag == "zombie") then currentSpeed = SpecialEvents.getZombieSpeed(player.deployedTroops[i]) end
+          if(player.deployedTroops[i].weapon ~= nil) then
+            currentSpeed = currentSpeed - player.deployedTroops[i].weapon.bulk
+          end
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "seasonal_events:zombie_wave_chance"
+target = "includes/mnb2.lua"
+pattern = '''
+  if(specialEvent == "Halloween" and player.mnb2SubGame == 99) then
+    if(randNbr(100) <= 10) then
+'''
+position = "at"
+times = 1
+payload = '''
+  if(specialEvent == "Halloween" and player.mnb2SubGame == 99) then
+    if(randNbr(100) <= SpecialEvents.getWaveSpawnChance()) then
+'''
+match_indent = true

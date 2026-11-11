@@ -1,0 +1,25 @@
+{
+  "$schema": "../../Quartermaster/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "wayfinder",
+  "name": "Wayfinder",
+  "version": "1.0.0",
+  "game_version": ">=0.5.3",
+  "authors": [
+    "Gamiseus"
+  ],
+  "description": "A* pathfinding for infantry and vehicles. Units route around trees, rocks, buildings, wire, fire and known mines, with paths solved on a background thread. Changes how units move.",
+  "category": "Gameplay",
+  "tags": [
+    "Pathfinding",
+    "AI",
+    "Movement"
+  ],
+  "load_priority": 20,
+  "update_keys": [
+    "GitHub:Gamiseus/MnB-Mods#Wayfinder.zip"
+  ],
+  "qm_features": [
+    "apply_as"
+  ]
+}

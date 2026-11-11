@@ -1,0 +1,11 @@
+id = "true_sight"
+name = "TrueSight"
+
+[[keybinds]]
+id = "los_overlay"
+name = "Toggle Line Of Sight Overlay"
+category = "Diagnostics"
+default = "f10"
+tab = "TrueSight"
+description = "Shows the obstacles and the rays cast against them"
+on_trigger = "TrueSight.toggleOverlay"

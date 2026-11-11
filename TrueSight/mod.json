@@ -1,0 +1,25 @@
+{
+  "$schema": "../../Quartermaster/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "true_sight",
+  "name": "TrueSight",
+  "version": "1.0.0",
+  "game_version": ">=0.5.3",
+  "authors": [
+    "Gamiseus"
+  ],
+  "description": "Line of sight by ray casting against the real shapes of trees, rocks, buildings, smoke and vehicles (Box2D), in place of the game's sampled check. Changes who can see and shoot whom.",
+  "category": "Gameplay",
+  "tags": [
+    "Line of sight",
+    "Physics",
+    "AI"
+  ],
+  "load_priority": 20,
+  "update_keys": [
+    "GitHub:Gamiseus/MnB-Mods#TrueSight.zip"
+  ],
+  "qm_features": [
+    "apply_as"
+  ]
+}

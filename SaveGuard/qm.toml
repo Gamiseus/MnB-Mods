@@ -1,0 +1,16 @@
+[manifest]
+version = "1.0.0"
+priority = 10
+
+[publish]
+repository = "Gamiseus/MnB-Mods"
+asset = "SaveGuard.zip"
+
+# Takes the place of the game's serializer (includes/ser.lua, a small library file).
+# Same output format; it leaves purely visual data out of saves.
+[[patches]]
+[patches.module]
+id = "save_guard:serializer"
+source = "ser.lua"
+before = "main.lua"
+name = "includes/ser"

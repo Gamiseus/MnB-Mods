@@ -1,0 +1,156 @@
+[manifest]
+version = "2.0.0"
+priority = 50
+
+[publish]
+repository = "Gamiseus/MnB-Mods"
+asset = "SquadTactics.zip"
+
+# --- Modules ----------------------------------------------------------------
+
+[[patches]]
+[patches.module]
+id = "squad_tactics:module_move"
+source = "smart_move.lua"
+before = "main.lua"
+name = "includes/smart_move"
+
+[[patches]]
+[patches.module]
+id = "squad_tactics:module_reaction"
+source = "combat_reaction.lua"
+before = "main.lua"
+name = "includes/combat_reaction"
+
+[[patches]]
+[patches.module]
+id = "squad_tactics:module_main"
+source = "squad_tactics.lua"
+before = "main.lua"
+name = "includes/squad_tactics"
+
+[[patches]]
+[patches.pattern]
+id = "squad_tactics:require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+SquadTactics = require "includes/squad_tactics"
+smart_move = SquadTactics.Move
+'''
+
+# --- Move orders (main.lua) --------------------------------------------------
+# The game's own order code is left as it is. One line before it notes who is selected,
+# one line after it spreads those soldiers out.
+
+[[patches]]
+[patches.pattern]
+id = "squad_tactics:order_before"
+name = "Note the selected soldiers"
+target = "main.lua"
+pattern = "--if landed or within boat"
+position = "before"
+times = 1
+payload = '''
+        local squadTacticsBatch = SquadTactics.captureSelection()
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "squad_tactics:order_after"
+name = "Spread the group out"
+target = "main.lua"
+pattern = "--check to move vehicles"
+position = "before"
+times = 1
+payload = '''
+            SquadTactics.afterMoveOrder(squadTacticsBatch, x + player.screenx, y + player.screeny)
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "squad_tactics:halt"
+name = "Halt forgets the interrupted order"
+target = "main.lua"
+pattern = "player.deployedTroops[i].targety = player.deployedTroops[i].y"
+position = "after"
+times = 1
+payload = '''
+        SquadTactics.onHalt(player.deployedTroops[i])
+'''
+match_indent = true
+
+# --- Per soldier, per frame (includes/ai.lua) --------------------------------
+
+[[patches]]
+[patches.pattern]
+id = "squad_tactics:soldier_update"
+target = "includes/ai.lua"
+pattern = "player.deployedTroops[i].breathTimer = player.deployedTroops[i].breathTimer + dt"
+position = "after"
+times = 1
+payload = '''
+      SquadTactics.updateSoldier(player.deployedTroops[i], dt)
+'''
+match_indent = true
+
+# --- Squad size limit --------------------------------------------------------
+
+# The counter-assault trigger: 6 exposed soldiers in the game, the option here.
+[[patches]]
+[patches.pattern]
+id = "squad_tactics:limit_counter_assault"
+target = "includes/urb_engine.lua"
+pattern = '''
+      if(player.mnb2SubGame ~= 8) then
+        if(squadSizer() > 6) then
+          if(funkMasterFlexTimer <= 0) then
+           -- print("squad above 6!!")
+            local funkMasterFlex = squadSizer()
+            if(funkMasterFlex > 12) then
+'''
+position = "at"
+times = 1
+payload = '''
+      if(player.mnb2SubGame ~= 8) then
+        local squadLimit = SquadTactics.squadLimit()
+        if(squadSizer() > squadLimit) then
+          if(funkMasterFlexTimer <= 0) then
+           -- print("squad above 6!!")
+            local funkMasterFlex = squadSizer()
+            if(funkMasterFlex > squadLimit * 2) then
+'''
+match_indent = true
+apply_as = "edits"
+
+# Crowd control after wave 100: twice the limit instead of 12.
+[[patches]]
+[patches.pattern]
+id = "squad_tactics:limit_crowd_control"
+target = "includes/mnb2.lua"
+pattern = "    if(randNbr(100) < (realSquadSizer() -12)) then "
+position = "at"
+times = 1
+payload = "    if(randNbr(100) < (realSquadSizer() - SquadTactics.squadLimit() * 2)) then "
+
+# The "more than 6 troops" announcement: silent under the limit, reworded for other limits.
+[[patches]]
+[patches.pattern]
+id = "squad_tactics:limit_warning"
+target = "includes/mnb2.lua"
+pattern = '''
+function sizeControl()
+    anounceStuff(mnb2SizeControl)
+'''
+position = "at"
+times = 1
+payload = '''
+function sizeControl()
+    local squadLimit = SquadTactics.squadLimit()
+    if squadSizer() <= squadLimit then return end
+    anounceStuff(SquadTactics.sizeWarning(squadLimit) or mnb2SizeControl)
+'''
+match_indent = true

@@ -1,0 +1,168 @@
+[manifest]
+version = "1.0.1"
+priority = 10
+
+[publish]
+repository = "Gamiseus/MnB-Mods"
+asset = "PerfKit.zip"
+
+# --- Modules --------------------------------------------------------------
+
+[[patches]]
+[patches.module]
+id = "perfkit:module_layer"
+source = "perfkit_layer.lua"
+before = "main.lua"
+name = "includes/perfkit_layer"
+
+[[patches]]
+[patches.module]
+id = "perfkit:module_decals"
+source = "perfkit_decals.lua"
+before = "main.lua"
+name = "includes/perfkit_decals"
+
+[[patches]]
+[patches.module]
+id = "perfkit:module_particles"
+source = "perfkit_particles.lua"
+before = "main.lua"
+name = "includes/perfkit_particles"
+
+[[patches]]
+[patches.module]
+id = "perfkit:module_atlas"
+source = "perfkit_atlas.lua"
+before = "main.lua"
+name = "includes/perfkit_atlas"
+
+[[patches]]
+[patches.module]
+id = "perfkit:module_profiler"
+source = "perfkit_profiler.lua"
+before = "main.lua"
+name = "includes/perfkit_profiler"
+
+[[patches]]
+[patches.module]
+id = "perfkit:module_main"
+source = "perfkit.lua"
+before = "main.lua"
+name = "includes/perfkit"
+
+# The game's own files are loaded above this line, so PerfKit can wrap their functions.
+[[patches]]
+[patches.pattern]
+id = "perfkit:require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'PerfKit = require "includes/perfkit"'
+stack = "first"
+
+# --- Drawing (includes/drawFiles.lua) --------------------------------------
+# Each of the game's three loops is replaced by one call. With the option off, the call
+# runs the game's own loop.
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:draw_decals"
+name = "Decal loop"
+target = "includes/drawFiles.lua"
+pattern = '''
+  for n=1, #player.deco, 1 do
+    love.graphics.draw( _G[player.deco[n].name], player.deco[n].x, player.deco[n].y, player.deco[n].rotation, player.deco[n].size/10, player.deco[n].size/10, _G[player.deco[n].name]:getWidth( )/2, _G[player.deco[n].name]:getHeight( )/2)
+  end
+'''
+position = "at"
+times = 1
+payload = '''
+  PerfKit.drawDecals()
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:draw_particles"
+name = "Particle loop"
+target = "includes/drawFiles.lua"
+pattern = '''
+  for i=1, #player.particles, 1 do
+    love.graphics.setColor( love.math.colorFromBytes(255, 255, 255, player.particles[i].alpha))
+    if player.particles[i].typez == "muzzleFlash" then
+        -- pass 1: bright core
+        love.graphics.setShader(muzzleFlashShader)
+        love.graphics.setBlendMode("add")
+        love.graphics.draw(
+            _G[player.particles[i].sprite],
+            player.particles[i].x, player.particles[i].y,
+            player.particles[i].innerRotation,
+            player.particles[i].scale, player.particles[i].scale,
+            player.particles[i].xoffset, player.particles[i].yoffset - 20
+        )
+        love.graphics.setShader()
+
+        -- pass 2 (optional): soft halo spill
+        -- tie halo alpha to particle alpha so it dies quickly
+        local a = player.particles[i].alpha
+        love.graphics.setColor(255, 230, 160, math.min(180, a)) -- warm, softer alpha
+        love.graphics.draw(
+            _G[player.particles[i].sprite],
+            player.particles[i].x, player.particles[i].y,
+            player.particles[i].innerRotation,
+            player.particles[i].scale * 1.1, player.particles[i].scale * 1.1,
+            player.particles[i].xoffset, player.particles[i].yoffset - 20
+        )
+
+        love.graphics.setBlendMode("alpha") -- reset
+    elseif(player.particles[i].typez == "bazookaFlash") then
+      love.graphics.draw(_G[player.particles[i].sprite], player.particles[i].x, player.particles[i].y, (player.particles[i].innerRotation),player.particles[i].scale,player.particles[i].scale, player.particles[i].xoffset, player.particles[i].yoffset-20)
+    elseif(player.particles[i].typez == "flarePart" or player.particles[i].typez == "redFlarePart") then
+      if(randNbr(100)< 50) then
+        local flareScale = randNbr(15)/10
+        love.graphics. draw(_G[player.particles[i].sprite], player.particles[i].x, player.particles[i].y, math.rad(randNbr(360)), flareScale, flareScale, player.particles[i].xoffset, player.particles[i].yoffset)
+      end
+    else
+      love.graphics.draw(_G[player.particles[i].sprite], player.particles[i].x, player.particles[i].y, (player.particles[i].innerRotation),player.particles[i].scale,player.particles[i].scale, player.particles[i].xoffset, player.particles[i].yoffset)
+    end
+  end
+'''
+position = "at"
+times = 1
+payload = '''
+  PerfKit.drawParticles(player.particles, false)
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:draw_top_particles"
+name = "Top particle loop"
+target = "includes/drawFiles.lua"
+pattern = '''
+  if(#player.topParticles > 0) then
+    for i=1, #player.topParticles, 1 do
+      love.graphics.setColor( love.math.colorFromBytes(255, 255, 255, player.topParticles[i].alpha))
+      love.graphics.draw(_G[player.topParticles[i].sprite], player.topParticles[i].x, player.topParticles[i].y, (player.topParticles[i].innerRotation),player.topParticles[i].scale,player.topParticles[i].scale, player.topParticles[i].xoffset, player.topParticles[i].yoffset)
+    end
+  end
+'''
+position = "at"
+times = 1
+payload = '''
+  PerfKit.drawParticles(player.topParticles, true)
+'''
+match_indent = true
+
+# Once per frame: the overlay and the log watch.
+[[patches]]
+[patches.pattern]
+id = "perfkit:frame"
+target = "includes/drawFiles.lua"
+pattern = "--cues"
+position = "before"
+times = 1
+payload = '''
+    PerfKit.frame()
+'''
+match_indent = true

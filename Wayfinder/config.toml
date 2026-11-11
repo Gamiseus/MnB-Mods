@@ -1,0 +1,36 @@
+id = "wayfinder"
+name = "Wayfinder"
+
+[[options]]
+id = "pathfinding"
+label = "Pathfinding"
+type = "checkbox"
+default = true
+description = "Infantry and vehicles route around obstacles and hazards instead of walking straight"
+aliases = ["pathfindingEnabled"]
+
+[[options]]
+id = "safe_destination"
+label = "Safer Destinations"
+type = "checkbox"
+default = true
+description = "Moves an order that lands on a hazard or inside an obstacle to the nearest safe spot"
+aliases = ["safeDestinationEnabled"]
+
+[[options]]
+id = "async_paths"
+label = "Solve Paths In The Background"
+type = "checkbox"
+default = true
+description = "Paths are solved on a second thread, so large squads do not stall the game"
+aliases = ["asyncPathsEnabled"]
+
+[[keybinds]]
+id = "navgrid_overlay"
+name = "Toggle Navigation Grid Overlay"
+category = "Diagnostics"
+default = "f9"
+modifiers = ["shift"]
+tab = "Wayfinder"
+description = "Shows the navigation grid and the paths in use"
+on_trigger = "Wayfinder.toggleOverlay"

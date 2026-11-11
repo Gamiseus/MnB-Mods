@@ -1,0 +1,26 @@
+{
+  "$schema": "../../Quartermaster/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "seasonal_events",
+  "name": "Seasonal Events",
+  "version": "2.0.0",
+  "game_version": ">=0.5.3",
+  "authors": [
+    "Gamiseus"
+  ],
+  "description": "Choose which special event is active, whatever the date. Events are modules; Halloween becomes a three-way fight with zombies that rise from the dead.",
+  "category": "Gameplay",
+  "tags": [
+    "Events",
+    "Halloween",
+    "Classic",
+    "Gameplay"
+  ],
+  "load_priority": 30,
+  "update_keys": [
+    "GitHub:Gamiseus/MnB-Mods#SeasonalEvents.zip"
+  ],
+  "qm_features": [
+    "apply_as"
+  ]
+}

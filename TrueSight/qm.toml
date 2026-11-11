@@ -1,0 +1,124 @@
+[manifest]
+version = "1.0.0"
+priority = 20
+
+[publish]
+repository = "Gamiseus/MnB-Mods"
+asset = "TrueSight.zip"
+
+[[patches]]
+[patches.module]
+id = "true_sight:module"
+source = "los_physics.lua"
+before = "main.lua"
+name = "includes/los_physics"
+
+[[patches]]
+[patches.module]
+id = "true_sight:module_actions"
+source = "truesight.lua"
+before = "main.lua"
+name = "includes/truesight"
+
+# Rays are cast with LÖVE's physics module (Box2D).
+[[patches]]
+[patches.pattern]
+id = "true_sight:conf_physics"
+target = "conf.lua"
+pattern = "t.modules.physics = false          -- Enable the physics module (boolean)"
+position = "at"
+payload = "t.modules.physics = true           -- Enable the physics module (boolean)"
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "true_sight:require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+los_physics = require "includes/los_physics"
+TrueSight = require "includes/truesight"
+'''
+
+[[patches]]
+[patches.pattern]
+id = "true_sight:init"
+target = "main.lua"
+pattern = "function love.load()"
+position = "after"
+times = 1
+payload = '''
+  los_physics.init()
+'''
+match_indent = true
+
+# Rebuild the obstacle world when the map changed, once per frame.
+[[patches]]
+[patches.pattern]
+id = "true_sight:update"
+target = "main.lua"
+# love.update only: the next line pins the one `if(pause == 0) then` that runs the game loop.
+pattern = '''
+if(pause == 0) then
+runTime0(dt)
+'''
+position = "at"
+times = 1
+payload = '''
+if(pause == 0) then
+  los_physics.updateFrame()
+  runTime0(dt)
+'''
+match_indent = true
+apply_as = "edits"
+
+# los() asks the ray caster. The game's own check stays available as vanilla_los().
+[[patches]]
+[patches.pattern]
+id = "true_sight:los"
+target = "includes/urb_engine.lua"
+pattern = "function los(x1, x2, y1, y2)"
+position = "at"
+payload = '''
+function los(x1, x2, y1, y2)
+  if los_physics then
+    return los_physics.checkLOS(x1, x2, y1, y2)
+  end
+  return vanilla_los(x1, x2, y1, y2)
+end
+
+function vanilla_los(x1, x2, y1, y2)
+'''
+match_indent = true
+
+# The same for los2().
+[[patches]]
+[patches.pattern]
+id = "true_sight:los2"
+target = "includes/urb_engine.lua"
+pattern = "function los2(shooter, target)"
+position = "at"
+payload = '''
+function los2(shooter, target)
+  if los_physics then
+    return los_physics.checkLOS2(shooter, target)
+  end
+  return vanilla_los2(shooter, target)
+end
+
+function vanilla_los2(shooter, target)
+'''
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "true_sight:overlay"
+target = "includes/drawFiles.lua"
+pattern = "--cues"
+position = "before"
+times = 1
+payload = '''
+    los_physics.drawDebugOverlay()
+'''
+match_indent = true

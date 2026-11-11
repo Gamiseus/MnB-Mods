@@ -1,0 +1,42 @@
+{
+  "$schema": "../../Quartermaster/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "squad_tactics",
+  "name": "Squad Tactics",
+  "version": "2.0.0",
+  "game_version": ">=0.5.3",
+  "authors": [
+    "Gamiseus"
+  ],
+  "description": "Group move orders that give each soldier a position suited to their role and nearby cover, soldiers that react to contact while moving, and a configurable squad size limit.",
+  "category": "Gameplay",
+  "tags": [
+    "AI",
+    "Tactics",
+    "Squad"
+  ],
+  "load_priority": 50,
+  "update_keys": [
+    "GitHub:Gamiseus/MnB-Mods#SquadTactics.zip"
+  ],
+  "relationships": {
+    "requires": {
+      "wayfinder": ">=1.0.0"
+    },
+    "recommends": {
+      "true_sight": "*"
+    },
+    "load_after": [
+      "wayfinder",
+      "true_sight"
+    ]
+  },
+  "overrides": [
+    "shared_field:_pfGoalX",
+    "shared_field:_pfGoalY",
+    "shared_field:pathQueue"
+  ],
+  "qm_features": [
+    "apply_as"
+  ]
+}

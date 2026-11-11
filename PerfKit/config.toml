@@ -1,0 +1,49 @@
+id = "perfkit"
+name = "PerfKit"
+
+[[options]]
+id = "bake_decals"
+label = "Bake Decals"
+type = "checkbox"
+default = true
+description = "Draw blood, craters and rubble once onto a baked layer instead of every frame"
+
+[[options]]
+id = "bake_debris"
+label = "Bake Settled Debris"
+type = "checkbox"
+default = true
+description = "Move casings and debris that stopped moving onto a baked layer until they expire"
+
+[[options]]
+id = "cull_particles"
+label = "Skip Off-Screen Particles"
+type = "checkbox"
+default = true
+description = "Do not draw particles that are outside the view"
+
+[[options]]
+id = "atlas"
+label = "Texture Atlas (experimental)"
+type = "checkbox"
+default = false
+description = "Pack small sprites onto shared textures so the graphics card gets fewer, larger draw calls. Uses about 130 MB more video memory"
+
+[[keybinds]]
+id = "perfkit_profile"
+name = "Profile 10 Seconds"
+category = "Diagnostics"
+default = "f11"
+modifiers = ["ctrl"]
+tab = "PerfKit"
+description = "Measures where the game spends its time and writes Mods/qm/perfkit-profile.txt"
+on_trigger = "PerfKit.profile"
+
+[[keybinds]]
+id = "perfkit_overlay"
+name = "Toggle Performance Overlay"
+category = "Diagnostics"
+default = "f11"
+tab = "PerfKit"
+description = "Shows FPS, draw calls and how many particles and decals are baked"
+on_trigger = "PerfKit.toggleOverlay"
