@@ -1,0 +1,7 @@
+# Tests kept on our machines only.
+/tests/
+__pycache__/
+/tests
+# Release zips (tools/package_mods.py writes them to dist/).
+/dist/
+/*.zip

@@ -17,97 +17,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Mod Archives
-        run: |
-          echo "Building mod zip archives..."
-          MOD_DIRS=(
-            "PerfKit"
-            "Wayfinder"
-            "TrueSight"
-            "SaveGuard"
-            "SeasonalEvents"
-            "SquadTactics"
-          )
-          for dir in "${MOD_DIRS[@]}"; do
-            if [ -d "$dir" ] && [ ! -f "${dir}.zip" ]; then
-              (cd "$dir" && zip -r "../${dir}.zip" .)
-            fi
-          done
-
-      - name: Fetch un-updated assets from previous releases
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          FILES=(
-            "PerfKit.zip"
-            "Wayfinder.zip"
-            "TrueSight.zip"
-            "SaveGuard.zip"
-            "SeasonalEvents.zip"
-            "SquadTactics.zip"
-          )
-
-          PAST_TAGS=$(gh release list --limit 20 --json tagName -q '.[].tagName')
-
-          for file in "${FILES[@]}"; do
-            if [ -f "$file" ]; then
-              echo "✓ $file was updated in this build."
-            else
-              echo "Searching past releases for $file..."
-              FOUND=false
-              for tag in $PAST_TAGS; do
-                if gh release download "$tag" -p "$file" 2>/dev/null; then
-                  echo "  -> Found and carried forward $file from release $tag"
-                  FOUND=true
-                  break
-                fi
-              done
-
-              if [ "$FOUND" = false ]; then
-                echo "::warning ::$file was not found in past releases or current build!"
-              fi
-            fi
-          done
-
-      - name: Generate QuarterMaster Release Index (qm-release-index.json)
-        run: |
-          python3 - << 'EOF'
-          import datetime, glob, hashlib, json, os, zipfile
-
-          index = {
-              "schema_version": 1,
-              "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-              "repository": os.environ.get("GITHUB_REPOSITORY", "Gamiseus/MnB-Mods"),
-              "release_tag": os.environ.get("GITHUB_REF_NAME", "latest"),
-              "mods": {}
-          }
-
-          for zip_path in sorted(glob.glob("*.zip")):
-              with open(zip_path, "rb") as f:
-                  data = f.read()
-              sha256 = hashlib.sha256(data).hexdigest()
-              size_bytes = len(data)
-              mod_meta = None
-              with zipfile.ZipFile(zip_path, "r") as zf:
-                  for name in zf.namelist():
-                      if name.endswith("mod.json"):
-                          mod_meta = json.loads(zf.read(name).decode("utf-8"))
-                          break
-              if mod_meta and "id" in mod_meta:
-                  mod_id = mod_meta["id"]
-                  index["mods"][mod_id] = {
-                      "id": mod_id,
-                      "name": mod_meta.get("name", mod_id),
-                      "version": mod_meta.get("version", "1.0.0"),
-                      "asset_name": os.path.basename(zip_path),
-                      "sha256": sha256,
-                      "size_bytes": size_bytes,
-                      "game_version": mod_meta.get("game_version")
-                  }
-
-          with open("qm-release-index.json", "w", encoding="utf-8") as f:
-              json.dump(index, f, indent=2)
-          print("Generated qm-release-index.json with", len(index["mods"]), "mods.")
-          EOF
+        # One zip per mod, each holding a single folder named after the mod, plus
+        # qm-release-index.json. The same script builds the zips locally.
+        run: python3 tools/package_mods.py --out dist --index
 
       - name: Publish or Update Release
         env:
@@ -115,10 +27,10 @@ jobs:
         run: |
           if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
             echo "Release ${{ github.ref_name }} already exists. Uploading/overwriting assets..."
-            gh release upload "${{ github.ref_name }}" *.zip qm-release-index.json --clobber
+            gh release upload "${{ github.ref_name }}" dist/*.zip dist/qm-release-index.json --clobber
           else
             echo "Creating new release ${{ github.ref_name }}..."
-            gh release create "${{ github.ref_name }}" *.zip qm-release-index.json \
+            gh release create "${{ github.ref_name }}" dist/*.zip dist/qm-release-index.json \
               --title "${{ github.ref_name }}" \
               --generate-notes
           fi

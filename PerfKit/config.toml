@@ -29,6 +29,27 @@ type = "checkbox"
 default = false
 description = "Pack small sprites onto shared textures so the graphics card gets fewer, larger draw calls. Uses about 130 MB more video memory"
 
+[[options]]
+id = "fast_proximity"
+label = "Faster Enemy-Nearby Checks"
+type = "checkbox"
+default = true
+description = "Counts the enemies near a soldier from a per-frame sorting of the soldiers instead of looking at every soldier on the map each time. A soldier who changes sides is counted on his new side one frame later"
+
+[[options]]
+id = "jit_cache"
+label = "Larger JIT Code Cache"
+type = "checkbox"
+default = true
+description = "Lets LuaJIT keep more compiled code (20000 traces, 32 MB) so a large battle does not make it throw everything away and recompile. The overlay (F11) shows how often that happens"
+
+[[options]]
+id = "sampling_profiler"
+label = "Line Sampler For Profiles (can freeze the game)"
+type = "checkbox"
+default = false
+description = "Profile with LuaJIT's sampler instead of timing functions. Shows single lines, but has frozen the game after a profile; the report is saved first. Restart the game afterwards"
+
 [[keybinds]]
 id = "perfkit_profile"
 name = "Profile 10 Seconds"

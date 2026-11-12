@@ -1,5 +1,5 @@
 [manifest]
-version = "1.0.1"
+version = "1.4.0"
 priority = 10
 
 [publish]
@@ -35,6 +35,20 @@ id = "perfkit:module_atlas"
 source = "perfkit_atlas.lua"
 before = "main.lua"
 name = "includes/perfkit_atlas"
+
+[[patches]]
+[patches.module]
+id = "perfkit:module_timing"
+source = "perfkit_timing.lua"
+before = "main.lua"
+name = "includes/perfkit_timing"
+
+[[patches]]
+[patches.module]
+id = "perfkit:module_near"
+source = "perfkit_near.lua"
+before = "main.lua"
+name = "includes/perfkit_near"
 
 [[patches]]
 [patches.module]
@@ -166,3 +180,449 @@ payload = '''
     PerfKit.frame()
 '''
 match_indent = true
+
+# --- Game loops (includes/urb_engine.lua) ----------------------------------
+# Same results as the game's own lines, computed with less work.
+
+# The once-a-second fire update tested every decal's name with a pattern search, for every
+# fire. The answer for a name is now looked up (PerfKit.roundKind).
+[[patches]]
+[patches.pattern]
+id = "perfkit:fire_round_large"
+name = "Fire update: large live rounds"
+target = "includes/urb_engine.lua"
+pattern = 'if string.match(deco.name, "liveRoundLarge") and distanceCheck(deco.x, deco.y, firez.x, firez.y) < firez.size * 150 then'
+position = "at"
+times = 1
+payload = 'if PerfKit.roundKind[deco.name] == "Large" and distanceCheck(deco.x, deco.y, firez.x, firez.y) < firez.size * 150 then'
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:fire_round_med"
+name = "Fire update: medium live rounds"
+target = "includes/urb_engine.lua"
+pattern = 'elseif string.match(deco.name, "liveRoundMed") and distanceCheck(deco.x, deco.y, firez.x, firez.y) < firez.size * 150 then'
+position = "at"
+times = 1
+payload = 'elseif PerfKit.roundKind[deco.name] == "Med" and distanceCheck(deco.x, deco.y, firez.x, firez.y) < firez.size * 150 then'
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:fire_round_small"
+name = "Fire update: small live rounds"
+target = "includes/urb_engine.lua"
+pattern = 'elseif string.match(deco.name, "liveRoundSmall") and distanceCheck(deco.x, deco.y, firez.x, firez.y) < firez.size * 150 then'
+position = "at"
+times = 1
+payload = 'elseif PerfKit.roundKind[deco.name] == "Small" and distanceCheck(deco.x, deco.y, firez.x, firez.y) < firez.size * 150 then'
+match_indent = true
+
+# slowedDown() asked "does this soldier have the tactical buff?" once per ground area, with
+# the same answer every time. It now asks once per call.
+[[patches]]
+[patches.pattern]
+id = "perfkit:slowed_once"
+name = "slowedDown: look up the tactical buff once"
+target = "includes/urb_engine.lua"
+pattern = "function slowedDown(dude)"
+position = "after"
+times = 1
+payload = '''
+  local __pk_tactical = dude ~= nil and hasBuffByTag("tactical", dude)
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:slowed_use"
+name = "slowedDown: use the answer"
+requires = ["perfkit:slowed_once"]
+target = "includes/urb_engine.lua"
+pattern = 'if(hasBuffByTag("tactical", dude)) then'
+position = "at"
+times = 1
+payload = 'if(__pk_tactical) then'
+match_indent = true
+
+# --- Particle removal (includes/particlesSystem.lua) -------------------------
+# The game removes an expired particle with table.remove, moving every particle behind it.
+# PerfKit.Particles.kill marks it instead; the marked ones leave together when the update
+# returns. Called from anywhere else, kill() is the game's own removal.
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:particle_kill"
+name = "Particle update: remove expired particles in one pass"
+target = "includes/particlesSystem.lua"
+pattern = "table.remove(player.particles, i)"
+position = "at"
+times = 16
+payload = "PerfKit.Particles.kill(player.particles, i, ticle)"
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:top_particle_kill"
+name = "Top particle update: remove expired particles in one pass"
+target = "includes/particlesSystem.lua"
+pattern = "table.remove(player.topParticles, i)"
+position = "at"
+times = 1
+payload = "PerfKit.Particles.kill(player.topParticles, i, ticle)"
+match_indent = true
+
+# --- Ground area scans (includes/urb_engine.lua) -----------------------------
+# The game keeps trees, cover, water and buildings in one list (player.groundType) and
+# walks all of it for many questions. These patches ask the cheap part of each question
+# first, so the distance is only worked out for an area that could matter.
+
+# getOccupantBuildingId and insideBuilding: only a concrete or wood area with the right
+# cover value counts as a building; that is now checked before the distance.
+[[patches]]
+[patches.pattern]
+id = "perfkit:building_kind_first"
+name = "Building checks: look at the kind of area before the distance"
+target = "includes/urb_engine.lua"
+pattern = "if(distanceCheck2(dude, player.groundType[u] ) < player.groundType[u].radius) then"
+position = "at"
+times = 2
+payload = 'if((player.groundType[u].name == "concrete" and (player.groundType[u].cover == 75 or player.groundType[u].cover == 50) or player.groundType[u].name == "wood" and (player.groundType[u].cover == 50)) and distanceCheck2(dude, player.groundType[u] ) < player.groundType[u].radius) then'
+match_indent = true
+
+# slowedDown: only an area marked slow can slow a soldier; checked before the distance.
+[[patches]]
+[patches.pattern]
+id = "perfkit:slowed_kind_first"
+name = "slowedDown: look at the kind of area before the distance"
+target = "includes/urb_engine.lua"
+pattern = '''
+if(distanceCheck2(dude, player.groundType[u]) < player.groundType[u].radius) then
+  if(player.groundType[u].slowy == "yes") then
+'''
+position = "at"
+times = 1
+payload = '''
+if(player.groundType[u].slowy == "yes" and distanceCheck2(dude, player.groundType[u]) < player.groundType[u].radius) then
+  if(player.groundType[u].slowy == "yes") then
+'''
+match_indent = true
+
+# exploDamageCheck asked "are the soldier and the explosion in the same building?" up to
+# three times per soldier, walking the whole list twice each time. It now asks once.
+[[patches]]
+[patches.pattern]
+id = "perfkit:explosion_same_building_once"
+name = "Explosion damage: ask once whether soldier and explosion share a building"
+target = "includes/urb_engine.lua"
+pattern = '''
+if((sameBuilding(dude, explo) ==  false and blastSave(dude, explo) == false) or
+  (sameBuilding(dude, explo) ==  true and coveredBuilding(dude) == false)or
+  (sameBuilding(dude, explo) ==  true and coveredBuilding(dude) == true and (explo.tag == "mineExplosion" or explo.tag == "rifleGrenadeExplosion"))) then
+'''
+position = "at"
+times = 1
+payload = '''
+local __pk_same = sameBuilding(dude, explo)
+if((__pk_same ==  false and blastSave(dude, explo) == false) or
+  (__pk_same ==  true and coveredBuilding(dude) == false)or
+  (__pk_same ==  true and coveredBuilding(dude) == true and (explo.tag == "mineExplosion" or explo.tag == "rifleGrenadeExplosion"))) then
+'''
+match_indent = true
+
+# --- Enemies near a soldier (includes/urb_engine.lua) ------------------------
+# These three count the soldiers of another faction within a distance by walking every
+# soldier on the map. With the option on they ask PerfKit.Near, which looks only at the
+# soldiers sorted into the columns within reach. With it off the game's loop below runs.
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_enemy_nearby"
+name = "enemyNearby: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function enemyNearby(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.count(dude, 600) end
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_friendlies_close"
+name = "friendliesCloseToTarget: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function friendliesCloseToTarget(target)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.count(target, 30) end
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_enemy_cqc"
+name = "enemyCqc: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function enemyCqc(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.count(dude, 30, PerfKit.Near.reveal) end
+'''
+
+# --- Explosions (includes/urb_engine.lua) ------------------------------------
+# Every explosion runs exploDamageCheck for every soldier on the map.
+
+# sameBuilding: the second one asked about is the explosion. Its building is worked out
+# once and remembered; when it is in no building the answer is "no" without looking the
+# soldier up at all.
+[[patches]]
+[patches.pattern]
+id = "perfkit:same_building_explosion_first"
+name = "sameBuilding: the explosion's building first, and remembered"
+target = "includes/urb_engine.lua"
+pattern = '''
+local dude1Building = getOccupantBuildingId(dude1)
+local dude2Building = getOccupantBuildingId(dude2)
+'''
+position = "at"
+times = 1
+payload = '''
+local dude2Building = PerfKit.buildingOf(dude2)
+if(dude2Building <= 0) then return false end
+local dude1Building = getOccupantBuildingId(dude1)
+'''
+match_indent = true
+
+# blastSave copied its sound for every soldier before knowing whether it would be played.
+# The copy is now made when it is played. The random number is drawn at the same place.
+[[patches]]
+[patches.pattern]
+id = "perfkit:blast_save_sound_later"
+name = "blastSave: copy the cover-save sound only when it plays"
+target = "includes/urb_engine.lua"
+pattern = '''
+clone_sfx2 = _G["exploCoverSave"..randNbr(15)]:clone()
+clone_sfx2:setVolume(stepScale(dude))
+'''
+position = "at"
+times = 1
+payload = '''
+clone_sfx2 = PerfKit.laterSound("exploCoverSave"..randNbr(15), dude)
+'''
+match_indent = true
+
+# More of the same family: counts of soldiers near a soldier, by faction.
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_axis_nearby"
+name = "axisNearby: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function axisNearby(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.countOf(dude, 600, "axis") end
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_allied_nearby"
+name = "alliedNearby: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function alliedNearby(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.countOf(dude, 100, "allied") end
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_allied_around"
+name = "alliedAround: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function alliedAround(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.countOf(dude, 500, "allied") end
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_allied_close_by"
+name = "alliedCloseBy: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function alliedCloseBy(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.countOf(dude, 200, "allied") end
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_friendly_nearby"
+name = "friendlyNearby: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function friendlyNearby(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return (PerfKit.Near.countOwn(dude, 200)) end
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_friendly_nearby2"
+name = "friendlyNearby2: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function friendlyNearby2(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return (PerfKit.Near.countOwn(dude, 600)) end
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_soldier_nearby"
+name = "soldierNearby: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = "function soldierNearby(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.countAll(dude, 200) end
+'''
+
+# checkObstruction counts the soldiers of the same faction within 20 px and names the first.
+# With the option on the game's loop below runs zero times.
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_check_obstruction"
+name = "checkObstruction: count from the per-frame sorting"
+target = "includes/urb_engine.lua"
+pattern = '''
+for i=1, #player.deployedTroops, 1 do
+  if(player.deployedTroops[i].id ~= soldier.id and player.deployedTroops[i].faction == soldier.faction and player.deployedTroops[i].health > 10) then
+'''
+position = "at"
+times = 1
+payload = '''
+if PerfKit.Near.on then
+  local __pk_first
+  obstructors, __pk_first = PerfKit.Near.countOwn(soldier, 20)
+  if __pk_first then obstructor = __pk_first.name end
+end
+for i=1, (PerfKit.Near.on and 0 or #player.deployedTroops), 1 do
+  if(player.deployedTroops[i].id ~= soldier.id and player.deployedTroops[i].faction == soldier.faction and player.deployedTroops[i].health > 10) then
+'''
+match_indent = true
+
+# convertedId finds a soldier's place in the list by walking it. The place is remembered
+# from the sorting and checked before it is used; if it does not hold, the walk below runs.
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_converted_id"
+name = "convertedId: look the soldier's place up"
+target = "includes/urb_engine.lua"
+pattern = "function convertedId(idzz)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then
+    local __pk_i = PerfKit.Near.indexOf(idzz)
+    if __pk_i then
+      returnId = __pk_i
+      return __pk_i
+    end
+  end
+'''
+
+# propagandaGathering walks every decal looking for a pamphlet, for every soldier that
+# thinks. With no pamphlet on the map there is nothing to walk for.
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_propaganda"
+name = "propagandaGathering: skip when no pamphlet is on the map"
+target = "includes/urb_engine.lua"
+pattern = "function propagandaGathering(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on and not PerfKit.Near.decalNamed("pamphletSmall") then return end
+'''
+
+# --- The AI's whole-army walks ---------------------------------------------------------
+
+# A machine gunner's target search writes a debug line for every enemy it passes over.
+# The game only prints it for one soldier, by name, but the text was put together, with a
+# distance worked out again, for every enemy on the map each time a gunner looked.
+[[patches]]
+[patches.pattern]
+id = "perfkit:gunner_debug_within"
+name = "soldierAI: gunner debug text only when it is printed (within range)"
+target = "includes/ai.lua"
+pattern = 'ltDebug(soldier, "gunner debug: enemy within range ("..distanceCheck(soldier.x, soldier.y, player.deployedTroops[u].x, player.deployedTroops[u].y) ..") but not closer than current target ("..soldier.targetDistance ..")")'
+position = "at"
+times = 1
+payload = 'if soldier.name == "the new 2lt" then ltDebug(soldier, "gunner debug: enemy within range ("..distanceCheck(soldier.x, soldier.y, player.deployedTroops[u].x, player.deployedTroops[u].y) ..") but not closer than current target ("..soldier.targetDistance ..")") end'
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:gunner_debug_beyond"
+name = "soldierAI: gunner debug text only when it is printed (beyond range)"
+target = "includes/ai.lua"
+pattern = 'ltDebug(soldier, "gunner debug: enemy beyond range ("..distanceCheck(soldier.x, soldier.y, player.deployedTroops[u].x, player.deployedTroops[u].y) ..")")'
+position = "at"
+times = 1
+payload = 'if soldier.name == "the new 2lt" then ltDebug(soldier, "gunner debug: enemy beyond range ("..distanceCheck(soldier.x, soldier.y, player.deployedTroops[u].x, player.deployedTroops[u].y) ..")") end'
+match_indent = true
+
+# Before every shot the game counts the holders of one award by walking every soldier's
+# awards.
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_original_six"
+name = "numberOfOGs: count once per frame"
+target = "includes/urb_engine.lua"
+pattern = "function numberOfOGs()"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.originals() end
+'''
+
+# The front line is asked for many times a frame, in places once per soldier looked at.
+# If no flagged Allied soldier is found the game's own walk below runs.
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_allied_front"
+name = "alliedFrontLine: read the front from the sorting"
+target = "includes/urb_engine.lua"
+pattern = "function alliedFrontLine()"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then
+    local __pk_front = PerfKit.Near.alliedFront()
+    if __pk_front then return __pk_front end
+  end
+'''
+
+[[patches]]
+[patches.pattern]
+id = "perfkit:near_closest_flagged"
+name = "closestflaggedEnemy: try the nearest enemy first"
+target = "includes/urb_engine.lua"
+pattern = "function closestflaggedEnemy(dude)"
+position = "after"
+times = 1
+payload = '''
+  if PerfKit.Near.on then return PerfKit.Near.closestFlagged(dude) end
+'''

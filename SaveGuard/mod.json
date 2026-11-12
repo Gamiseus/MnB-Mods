@@ -3,7 +3,7 @@
   "schema_version": 1,
   "id": "save_guard",
   "name": "SaveGuard",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "game_version": ">=0.5.3",
   "authors": [
     "Gamiseus"
@@ -17,5 +17,10 @@
   "load_priority": 10,
   "update_keys": [
     "GitHub:Gamiseus/MnB-Mods#SaveGuard.zip"
-  ]
+  ],
+  "relationships": {
+    "conflicts": {
+      "gcore": "*"
+    }
+  }
 }

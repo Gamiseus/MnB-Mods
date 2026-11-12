@@ -1,5 +1,5 @@
 [manifest]
-version = "2.0.0"
+version = "2.0.1"
 priority = 50
 
 [publish]
@@ -153,4 +153,18 @@ function sizeControl()
     if squadSizer() <= squadLimit then return end
     anounceStuff(SquadTactics.sizeWarning(squadLimit) or mnb2SizeControl)
 '''
+match_indent = true
+
+# The Germans' answer to an oversized squad repeats "while a 1-100 roll is under the squad's
+# size". With more than 100 soldiers under the player's command that never ends, and the
+# game locks up. The chance is capped (SquadTactics.sizePressure).
+[[patches]]
+[patches.pattern]
+id = "squad_tactics:size_pressure"
+name = "Oversized squad: the Germans' answer always ends"
+target = "includes/mnb2.lua"
+pattern = "while(randNbr(100) < squadSizer()) do"
+position = "at"
+times = 3
+payload = "while(randNbr(100) < SquadTactics.sizePressure()) do"
 match_indent = true

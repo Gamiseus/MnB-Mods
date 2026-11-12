@@ -12,6 +12,12 @@
 --   3. A registry, so a mod can add a particle type with a few lines instead of patching
 --      the game's 6,000-line addParticle. See register() and spawn().
 --
+--   4. Removal. The game takes an expired particle out with table.remove, which moves
+--      every particle behind it down one place: with 15,000 particles and 300 expiring in
+--      a frame that is millions of moves, and the lower the frame rate, the more expire per
+--      frame. A patch turns those removals into kill(); the expired ones are then taken
+--      out together, in one pass, when the game's update returns (see runSwept).
+--
 -- The game's addParticle, particleUpdate and topParticleUpdate still run for every live
 -- particle; they are wrapped, never rewritten.
 
@@ -27,6 +33,8 @@ Particles.SETTLE_INTERVAL = 0.25
 Particles.MIN_BAKE_LIFE = 3
 -- A chunk is redrawn at most this often when debris in it expires.
 Particles.EXPIRE_DELAY = 1.0
+-- At most this many chunks are redrawn in one frame.
+Particles.MAX_REDRAWS = 1
 
 -- ---------------------------------------------------------------------------
 -- Registry
@@ -265,16 +273,19 @@ local function expire(dt)
     end
   end
 
+  -- Redrawing a chunk means drawing all the debris on it again. After a barrage many
+  -- chunks come due together; they are redrawn a few per frame, longest waiting first.
   local due
-  for col, left in pairs(dirty) do
-    left = left - dt
-    if left <= 0 then
-      due = due or {}
-      due[col] = true
-      dirty[col] = nil
-    else
-      dirty[col] = left
+  for col, left in pairs(dirty) do dirty[col] = left - dt end
+  for _ = 1, Particles.MAX_REDRAWS do
+    local pick, least = nil, 0
+    for col, left in pairs(dirty) do
+      if left <= least then pick, least = col, left end
     end
+    if pick == nil then break end
+    due = due or {}
+    due[pick] = true
+    dirty[pick] = nil
   end
   if not due then return end
   for col in pairs(due) do layer:clear(col) end
@@ -318,13 +329,67 @@ function Particles.onBroom()
   dropDebris()
 end
 
+-- ---------------------------------------------------------------------------
+-- Removal in one pass
+-- ---------------------------------------------------------------------------
+
+local sweeping = nil   -- the list whose update is running under runSwept
+local dead = {}        -- particle -> true, killed during that update
+local deadCount = 0
+
+--- Takes the place of the game's `table.remove(list, i)` inside its particle updates.
+--- During an update run by runSwept the particle is only marked; anywhere else this is
+--- the game's own removal.
+function Particles.kill(list, i, p)
+  if list == sweeping and p ~= nil then
+    if not dead[p] then
+      dead[p] = true
+      deadCount = deadCount + 1
+    end
+  else
+    table.remove(list, i)
+  end
+end
+
+-- Takes the marked particles out, keeping the order of the rest.
+local function sweep(list)
+  local n = #list
+  local keep, found = 0, 0
+  for i = 1, n do
+    local p = list[i]
+    if dead[p] then
+      dead[p] = nil
+      found = found + 1
+    else
+      keep = keep + 1
+      if keep ~= i then list[keep] = p end
+    end
+  end
+  for i = keep + 1, n do list[i] = nil end
+  if found < deadCount then
+    -- Something else already took a marked particle off the list.
+    for p in pairs(dead) do dead[p] = nil end
+  end
+  deadCount = 0
+end
+
+--- Runs `fn(dt)`, an update of `list`, and takes out what it killed afterwards.
+function Particles.runSwept(list, fn, dt)
+  sweeping = list
+  deadCount = 0
+  fn(dt)
+  sweeping = nil
+  if deadCount > 0 then sweep(list) end
+end
+
 local bakeEnabled = true
 
 local function update(dt)
   if anyCustomLive then
     anyCustomLive = runCustom(player.particles, dt)
   end
-  origUpdate(dt)
+  -- Through the table, so the profiler can time the game's part on its own.
+  Particles.runSwept(player.particles, Particles.gameUpdate, dt)
 
   local list = player.particles
   if list ~= lastList then
@@ -340,9 +405,9 @@ local function update(dt)
   settleTimer = settleTimer + dt
   if settleTimer >= Particles.SETTLE_INTERVAL then
     settleTimer = 0
-    settle(list)
+    Particles.settle(list)
   end
-  expire(dt)
+  Particles.expire(dt)
 end
 
 local function topUpdate(dt)
@@ -352,7 +417,7 @@ local function topUpdate(dt)
     if defs[top[i].typez] then custom = true break end
   end
   if custom then runCustom(top, dt) end
-  origTopUpdate(dt)
+  Particles.runSwept(top, Particles.gameTopUpdate, dt)
 end
 
 --- Turns the baking of settled debris on or off. Off puts the debris back.
@@ -446,6 +511,11 @@ function Particles.install()
   origAddParticle = _G.addParticle
   origUpdate = _G.particleUpdate
   origTopUpdate = _G.topParticleUpdate
+  -- The steps of an update, reachable by name so the profiler lists them separately.
+  Particles.gameUpdate = origUpdate
+  Particles.gameTopUpdate = origTopUpdate
+  Particles.settle = settle
+  Particles.expire = expire
   _G.addParticle = addParticle
   _G.particleUpdate = update
   _G.topParticleUpdate = topUpdate

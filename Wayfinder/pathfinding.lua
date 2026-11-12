@@ -65,6 +65,9 @@ local workerThread = nil
 local reqChannel = nil
 local resChannel = nil
 local nextAsyncReqId = 1
+-- The grid version the worker thread holds. A path request carries only the unit's own
+-- details; the grid is sent again only after it was rebuilt.
+local sentGridVersion = -1
 local pendingUnitsByReqId = {}
 -- unit -> request id it is waiting for. Kept beside the unit, not on it, so it is never saved.
 local pendingReqByUnit = setmetatable({}, { __mode = "k" })
@@ -496,6 +499,7 @@ function pathfinding.rebuildGrid()
   end
 
   navGrid.dirty = false
+  navGrid.version = (navGrid.version or 0) + 1 -- the worker thread is sent the grid once per version
   navGrid.lastSyncTime = (player and player.missionTime) or 0
   pathfinding.stats.syncCount = pathfinding.stats.syncCount + 1
   if love.timer then
@@ -601,6 +605,8 @@ end
 -- ----------------------------------------------------------------------------
 -- Evaluate effective cell cost for a specific unit and start/goal buildings
 -- ----------------------------------------------------------------------------
+-- The worker thread has its own copy of these rules (unitCellCost in _THREAD_CODE); keep
+-- the two alike. tests/wayfinder_test.lua compares them.
 local function getEffectiveCellCost(idx, unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree)
   local base = navGrid.baseCosts[idx] or 1.0
   if base < 0 then
@@ -1016,22 +1022,13 @@ pathfinding._THREAD_CODE = [=[
 -- includes/pathfinder_thread.lua
 -- Background love.thread A* Pathfinding Worker for Mud and Blood
 -- ============================================================================
--- Listens on channel "pf_requests" for batch/async pathfinding jobs:
---   {
---     cmd = "path",
---     reqId = <number>,
---     unitId = <number>,
---     cols = <number>,
---     rows = <number>,
---     cellSize = <number>,
---     originX = <number>,
---     originY = <number>,
---     startX = <number>,
---     startY = <number>,
---     goalX = <number>,
---     goalY = <number>,
---     costs = <flat array of numbers length cols*rows, <0 means blocked>
---   }
+-- Listens on channel "pf_requests" for:
+--   { cmd = "grid", version, cols, rows, cellSize, originX, originY,
+--     baseCosts, buildingIds, treeIds, treeTrunkIds, vehicleBlocked,
+--     alliedMineCost, axisMineCost }      the nav-grid, sent after each rebuild
+--   { cmd = "path", reqId, unitId, gridVersion, startX, startY, goalX, goalY,
+--     isVehicle, startBldId, goalBldId, wireCutter, goalInTree, axis }
+--   { cmd = "quit" }
 -- Pushes results to channel "pf_results":
 --   {
 --     reqId = <number>,
@@ -1086,13 +1083,61 @@ local function isCorridorClear(costs, cols, rows, c1, r1, c2, r2)
   return true
 end
 
+-- The grid the main thread sent last ({ cmd = "grid", ... }).
+local grid = nil
+
+-- What a cell costs this unit. The same rules as getEffectiveCellCost on the main thread;
+-- keep the two alike.
+local function unitCellCost(g, job, idx)
+  local base = g.baseCosts[idx] or 1.0
+  if base < 0 then return -1 end
+  local isVehicle = job.isVehicle
+  if isVehicle and g.vehicleBlocked[idx] then return -1 end
+
+  local bId = g.buildingIds[idx] or 0
+  if bId > 0 then
+    if isVehicle then return -1 end
+    if bId == job.startBldId or bId == job.goalBldId then
+      if base < 6.0 then return 0.85 end
+    else
+      return -1
+    end
+  end
+
+  if job.goalInTree and g.treeIds[idx] and g.treeIds[idx] > 0 then
+    if not isVehicle then
+      if g.treeTrunkIds[idx] and g.treeTrunkIds[idx] > 0 then
+        return 1.8
+      else
+        return 0.95
+      end
+    end
+  end
+
+  if base == 6.5 and job.wireCutter then base = 1.05 end
+
+  local minePen
+  if job.axis then minePen = g.axisMineCost[idx] else minePen = g.alliedMineCost[idx] end
+  if minePen and minePen > 0 then base = base + minePen end
+  return base
+end
+
 local function solveAStar(job)
-  local cols = job.cols
-  local rows = job.rows
-  local cellSize = job.cellSize or 32
-  local originX = job.originX or 0
-  local originY = job.originY or 0
-  local costs = job.costs
+  local g = grid
+  if not g or g.version ~= job.gridVersion then
+    error("no grid for this request")
+  end
+  local cols = g.cols
+  local rows = g.rows
+  local cellSize = g.cellSize or 32
+  local originX = g.originX or 0
+  local originY = g.originY or 0
+  -- Costs are worked out when first asked for and kept for the rest of this request.
+  local costs = setmetatable({}, { __index = function(t, idx)
+    local v = unitCellCost(g, job, idx)
+    rawset(t, idx, v)
+    return v
+  end })
 
   local function worldToGrid(wx, wy)
     local c = math.floor((wx - originX) / cellSize) + 1
@@ -1323,6 +1368,11 @@ while true do
   local job = reqChannel:demand()
   if not job or job.cmd == "quit" then
     break
+  elseif job.cmd == "grid" then
+    grid = job
+  elseif job.cmd == "cost" then
+    -- For tests: what one cell costs under a request's details.
+    resChannel:push({ reqId = job.reqId, cost = grid and unitCellCost(grid, job, job.idx) })
   elseif job.cmd == "path" then
     local ok, found, waypoints = pcall(solveAStar, job)
     if ok then
@@ -1364,6 +1414,7 @@ function pathfinding.initThreadWorker()
 
   reqChannel = love.thread.getChannel("pf_requests")
   resChannel = love.thread.getChannel("pf_results")
+  sentGridVersion = -1 -- a new worker holds no grid yet
   th:start()
   workerThread = th
   return true
@@ -1399,15 +1450,32 @@ function pathfinding.requestPathAsync(unit, startX, startY, goalX, goalY)
   local isVehicle = unit and (unit.turret ~= nil or unit.pivotSpeed ~= nil) or false
   local wireCutter = canCutWire(unit)
 
-  -- Snapshot effective costs for this unit
   local goalInTree = false
   if navGrid.treeIds[cellIndex(gc, gr)] and navGrid.treeIds[cellIndex(gc, gr)] > 0 then
     goalInTree = true
   end
-  local snapshot = {}
-  local total = cols * rows
-  for i = 1, total do
-    snapshot[i] = getEffectiveCellCost(i, unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree)
+
+  -- The worker works out each cell's cost for this unit itself, from the grid it holds.
+  -- Sending the grid copies it, so that happens once per rebuild, not once per request.
+  if sentGridVersion ~= navGrid.version then
+    sentGridVersion = navGrid.version
+    pathfinding.stats.gridsSent = (pathfinding.stats.gridsSent or 0) + 1
+    reqChannel:push({
+      cmd = "grid",
+      version = navGrid.version,
+      cols = cols,
+      rows = rows,
+      cellSize = navGrid.cellSize,
+      originX = navGrid.originX,
+      originY = navGrid.originY,
+      baseCosts = navGrid.baseCosts,
+      buildingIds = navGrid.buildingIds,
+      treeIds = navGrid.treeIds,
+      treeTrunkIds = navGrid.treeTrunkIds,
+      vehicleBlocked = navGrid.vehicleBlocked,
+      alliedMineCost = navGrid.alliedMineCost,
+      axisMineCost = navGrid.axisMineCost
+    })
   end
 
   local reqId = nextAsyncReqId
@@ -1420,16 +1488,17 @@ function pathfinding.requestPathAsync(unit, startX, startY, goalX, goalY)
     cmd = "path",
     reqId = reqId,
     unitId = unit and unit.id or 0,
-    cols = cols,
-    rows = rows,
-    cellSize = navGrid.cellSize,
-    originX = navGrid.originX,
-    originY = navGrid.originY,
+    gridVersion = navGrid.version,
     startX = startX,
     startY = startY,
     goalX = goalX,
     goalY = goalY,
-    costs = snapshot
+    isVehicle = isVehicle and true or false,
+    startBldId = startBldId,
+    goalBldId = goalBldId,
+    wireCutter = wireCutter and true or false,
+    goalInTree = goalInTree,
+    axis = (unit and unit.faction) == "axis"
   })
 
   return reqId
@@ -1651,5 +1720,10 @@ function pathfinding.drawDebug()
 
   love.graphics.setColor(1, 1, 1, 1)
 end
+
+-- For tests.
+pathfinding._cellCost = getEffectiveCellCost
+function pathfinding._grid() return navGrid end
+function pathfinding._cellIndexAt(wx, wy) return cellIndex(pathfinding.worldToGrid(wx, wy)) end
 
 return pathfinding

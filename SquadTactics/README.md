@@ -18,3 +18,10 @@ For other mods, the global `SquadTactics`:
 | `SquadTactics.squadLimit()` | The limit in use; `math.huge` when off. |
 
 How often a soldier looks for threats, and to how many enemies it checks its line of sight, are `SquadTactics.Reaction.SCAN_INTERVAL` (0.2 s) and `SIGHT_CHECKS` (4).
+
+## Very large squads
+
+Two things change when far more soldiers are under your command than the game expects:
+
+- **The Germans' answer always ends.** The game answers an oversized squad with artillery, white phosphorus and air bursts, repeating each "while a 1 to 100 dice roll is under the squad's size". With more than 100 soldiers the roll is always under, the loop never ends and the game locks up. The chance to go on is capped at 90 in 100.
+- **Groups of more than 24 are placed in a block.** Choosing a spot for each soldier compares every soldier with every candidate spot; for a few hundred soldiers that takes a second or more. A large group gets rows and columns around the click instead, soldiers on the left taking the left columns.

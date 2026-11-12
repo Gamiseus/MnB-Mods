@@ -61,6 +61,10 @@ function SquadTactics.afterMoveOrder(batch, x, y)
   end
   if #moved < 2 then return end
 
+  if #moved >= 50 then
+    -- Said before the work starts: if the game ever stalls here, the log shows it.
+    print("[SquadTactics] placing a group of " .. #moved .. " soldiers")
+  end
   SquadTactics.Move.assignSquadMoveOrder(moved, x, y)
 
   -- One destination marker per soldier, in place of the game's single one.
@@ -109,6 +113,17 @@ function SquadTactics.squadLimit()
   if v == nil then return 6 end
   local n = tonumber(v)
   if not n then return math.huge end -- "OFF"
+  return n
+end
+
+--- The chance in 100 that the Germans' answer to an oversized squad goes on for another
+--- round. The game uses the squad's size itself and keeps going while a 1-100 dice roll
+--- comes up under it: with more than 100 soldiers under the player's command the roll is
+--- always under, the loop never ends and the game locks up. Capped here.
+SquadTactics.MAX_PRESSURE = 90
+function SquadTactics.sizePressure()
+  local n = squadSizer()
+  if n > SquadTactics.MAX_PRESSURE then return SquadTactics.MAX_PRESSURE end
   return n
 end
 

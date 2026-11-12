@@ -3,7 +3,7 @@
   "schema_version": 1,
   "id": "seasonal_events",
   "name": "Seasonal Events",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "game_version": ">=0.5.3",
   "authors": [
     "Gamiseus"
@@ -20,6 +20,11 @@
   "update_keys": [
     "GitHub:Gamiseus/MnB-Mods#SeasonalEvents.zip"
   ],
+  "relationships": {
+    "conflicts": {
+      "g_special_events": "*"
+    }
+  },
   "qm_features": [
     "apply_as"
   ]

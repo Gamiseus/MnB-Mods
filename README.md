@@ -15,7 +15,9 @@ The old names are gone with the "G" prefix. GCore, the all-in-one core mod, is n
 
 ## Download
 
-Each mod is a zip on the [latest release](https://github.com/Gamiseus/MnB-Mods/releases/latest): `PerfKit.zip`, `SaveGuard.zip`, `Wayfinder.zip`, `TrueSight.zip`, `SquadTactics.zip`, `SeasonalEvents.zip`. Import it in the QuarterMaster launcher.
+Each mod is a zip on the [latest release](https://github.com/Gamiseus/MnB-Mods/releases/latest): `PerfKit.zip`, `SaveGuard.zip`, `Wayfinder.zip`, `TrueSight.zip`, `SquadTactics.zip`, `SeasonalEvents.zip`. Import it in the QuarterMaster launcher, or extract it into the game's `Mods` folder: each zip holds one folder named after the mod, so you get `Mods/PerfKit/` and so on.
+
+Coming from the old mods? Remove GCore, GSpecialEvents and TacticalOverhaul first. They clash with the mods that replace them, and the launcher reports the pair as a conflict.
 
 ## Tests
 

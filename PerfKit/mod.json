@@ -3,7 +3,7 @@
   "schema_version": 1,
   "id": "perfkit",
   "name": "PerfKit",
-  "version": "1.0.1",
+  "version": "1.4.0",
   "game_version": ">=0.5.3",
   "authors": ["Gamiseus"],
   "description": "Makes long battles cheaper to draw: bakes decals and settled debris onto canvases and skips off-screen particles. Replaces no game files. Adds a small registry for mods that want their own particle types.",
@@ -11,5 +11,8 @@
   "tags": ["Performance", "Particles", "Decals", "Framework"],
   "load_priority": 10,
   "update_keys": ["GitHub:Gamiseus/MnB-Mods#PerfKit.zip"],
+  "relationships": {
+    "conflicts": { "gcore": "*" }
+  },
   "qm_features": ["stack_hint"]
 }

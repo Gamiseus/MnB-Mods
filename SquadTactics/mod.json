@@ -3,7 +3,7 @@
   "schema_version": 1,
   "id": "squad_tactics",
   "name": "Squad Tactics",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "game_version": ">=0.5.3",
   "authors": [
     "Gamiseus"
@@ -25,6 +25,9 @@
     },
     "recommends": {
       "true_sight": "*"
+    },
+    "conflicts": {
+      "tactical_overhaul": "*"
     },
     "load_after": [
       "wayfinder",

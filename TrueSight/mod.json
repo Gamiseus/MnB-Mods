@@ -3,7 +3,7 @@
   "schema_version": 1,
   "id": "true_sight",
   "name": "TrueSight",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "game_version": ">=0.5.3",
   "authors": [
     "Gamiseus"
@@ -19,6 +19,11 @@
   "update_keys": [
     "GitHub:Gamiseus/MnB-Mods#TrueSight.zip"
   ],
+  "relationships": {
+    "conflicts": {
+      "gcore": "*"
+    }
+  },
   "qm_features": [
     "apply_as"
   ]

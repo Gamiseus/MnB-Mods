@@ -13,6 +13,10 @@
 local smart_move = {}
 
 smart_move.MIN_SPACING = 44 -- Minimum pixel spacing between assigned squadmates
+-- Above this many soldiers a group is placed in a plain block. Choosing a spot for each
+-- soldier compares every soldier with every candidate spot and every spot already taken,
+-- which takes a second for a few hundred soldiers and grows with the cube of the group.
+smart_move.MAX_SMART = 24
 
 smart_move.lastAssignment = {
   clickX = 0,
@@ -459,9 +463,63 @@ end
 -- ----------------------------------------------------------------------------
 -- 7. Main Squad Assignment Engine
 -- ----------------------------------------------------------------------------
+-- A large group: rows and columns around the click, as many rows as the map is high.
+-- Soldiers on the left take the left columns, so paths cross as little as possible.
+function smart_move.assignBlockOrder(selectedSoldiers, clickX, clickY)
+  local n = #selectedSoldiers
+  local spacing = smart_move.MIN_SPACING
+  local mapH = (player and player.mapHeight) or 720
+  local rows = math.max(1, math.min(math.ceil(math.sqrt(n)), math.floor((mapH - 80) / spacing)))
+  local cols = math.ceil(n / rows)
+  local top = clamp(clickY - (rows - 1) * spacing * 0.5, 40, math.max(40, mapH - 40 - (rows - 1) * spacing))
+  local left = clickX - (cols - 1) * spacing * 0.5
+
+  local order = {}
+  for i = 1, n do order[i] = selectedSoldiers[i] end
+  table.sort(order, function(a, b)
+    if a.x ~= b.x then return a.x < b.x end
+    return (a.id or 0) < (b.id or 0)
+  end)
+
+  local assignments = {}
+  for col = 0, cols - 1 do
+    -- The soldiers of one column, top to bottom.
+    local column = {}
+    for row = 1, rows do column[#column + 1] = order[col * rows + row] end
+    table.sort(column, function(a, b)
+      if a.y ~= b.y then return a.y < b.y end
+      return (a.id or 0) < (b.id or 0)
+    end)
+    for row = 1, #column do
+      local s = column[row]
+      local x, y = left + col * spacing, top + (row - 1) * spacing
+      if pathfinding and pathfinding.findSafeDestination then
+        x, y = pathfinding.findSafeDestination(x, y, s)
+      end
+      s.targetx, s.targety = x, y
+      s._pfGoalX = nil -- Wayfinder solves the path again
+      s.temporaryStop = 0
+      assignments[#assignments + 1] = { soldier = s, x = x, y = y, cover = 0, role = "block", weight = 0, breakdown = {} }
+    end
+  end
+
+  smart_move.lastAssignment = {
+    clickX = clickX,
+    clickY = clickY,
+    threatUx = 1,
+    threatUy = 0,
+    timestamp = (player and player.missionTime) or 0,
+    slots = assignments
+  }
+  return assignments
+end
+
 function smart_move.assignSquadMoveOrder(selectedSoldiers, clickX, clickY)
   if not selectedSoldiers or #selectedSoldiers == 0 then
     return {}
+  end
+  if #selectedSoldiers > smart_move.MAX_SMART then
+    return smart_move.assignBlockOrder(selectedSoldiers, clickX, clickY)
   end
 
   local ux, uy = smart_move.determineThreatVector(clickX, clickY)
