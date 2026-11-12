@@ -17,12 +17,6 @@ The old names are gone with the "G" prefix. GCore, the all-in-one core mod, is n
 
 Each mod is a zip on the [latest release](https://github.com/Gamiseus/MnB-Mods/releases/latest): `PerfKit.zip`, `SaveGuard.zip`, `Wayfinder.zip`, `TrueSight.zip`, `SquadTactics.zip`, `SeasonalEvents.zip`. Import it in the QuarterMaster launcher.
 
-## Tests
+## Manual Install (Launcher unavailable still)
 
-The mods' logic is tested against stubs of the game, on the game's own LuaJIT. From this folder:
-
-```bash
-python tests/run_luajit.py tests/perfkit_test.lua
-```
-
-The same for `squad_tactics_test.lua` and `seasonal_events_test.lua`. The runner loads `../game/lua51.dll`; pass another path as a second argument. The game itself is not started.
+Each mod zip contains a folder named for the mod. Drop that folder directly into the mods folder in the Mud and Blood game folder after installing QuarterMaster.
