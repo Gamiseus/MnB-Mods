@@ -19,12 +19,6 @@ Each mod is a zip on the [latest release](https://github.com/Gamiseus/MnB-Mods/r
 
 Coming from the old mods? Remove GCore, GSpecialEvents and TacticalOverhaul first. They clash with the mods that replace them, and the launcher reports the pair as a conflict.
 
-## Tests
+## Manual Install (Launcher unavailable still)
 
-The mods' logic is tested against stubs of the game, on the game's own LuaJIT. From this folder:
-
-```bash
-python tests/run_luajit.py tests/perfkit_test.lua
-```
-
-The same for `squad_tactics_test.lua` and `seasonal_events_test.lua`. The runner loads `../game/lua51.dll`; pass another path as a second argument. The game itself is not started.
+Each mod zip contains a folder named for the mod. Drop that folder directly into the mods folder in the Mud and Blood game folder after installing QuarterMaster.
