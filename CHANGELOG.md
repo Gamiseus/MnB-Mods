@@ -8,6 +8,16 @@ One changelog for every mod in this folder, grouped by mod. Each mod has its own
 
 ## PerfKit
 
+### 1.4.0
+
+- `alliedFrontLine` reads the front from the per-frame sorting instead of walking every soldier; with no flagged Allied soldier the game's own function answers
+- `numberOfOGs`, asked before every shot, counts the award holders once per frame and again when an award is given
+- `closestflaggedEnemy` tries the nearest enemy first: same answer, a fraction of the sight checks
+- a machine gunner's target search no longer builds a debug text for every enemy out of range
+- settled debris: chunks that come due together are redrawn one per frame instead of all in one
+- profile report: the six most common particle types, the settled debris count, and the graphics card, processor threads and window size
+- `PerfKit.Near.alliedFront`, `closestFlagged`, `originals`, `awardGiven`; `PerfKit.Particles.MAX_REDRAWS`
+
 ### 1.3.1
 
 - release zip holds a single `PerfKit/` folder again (v2.0's zips had the files loose)

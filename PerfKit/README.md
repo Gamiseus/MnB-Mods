@@ -24,6 +24,12 @@ The game asks "how many enemies are near this soldier?" by looking at every sold
 
 With **Faster Enemy-Nearby Checks** (on by default) the soldiers are sorted once per frame by faction and by column of the map, and a question looks only at the other factions' soldiers in the columns within reach. This covers the game's counts of soldiers near a soldier: `enemyNearby`, `friendliesCloseToTarget`, `enemyCqc`, `axisNearby`, `alliedNearby`, `alliedAround`, `alliedCloseBy`, `friendlyNearby`, `friendlyNearby2`, `soldierNearby` and `checkObstruction`. The same option makes `convertedId` look a soldier's place in the list up instead of walking it, and lets `propagandaGathering` skip its walk over every decal when no pamphlet is on the map.
 
+Three more whole-army walks use the same option:
+
+- **`alliedFrontLine`.** Asked many times a frame, in places once per soldier a German looks at. The front is read from the easternmost columns of the sorting. When no flagged Allied soldier is found, the game's own function carries on as before.
+- **`numberOfOGs`.** Before every shot the game counted the holders of the "Original Six" award by walking every soldier's awards. They are counted once per frame, and again at once when an award is given.
+- **`closestflaggedEnemy`.** The game checked the line of sight to every flagged enemy nearer than the nearest one seen so far, in list order. The enemies are now tried nearest first, so the first one in sight is the answer: the same soldier, with a fraction of the sight checks.
+
 The counts are the game's, with one limit: a soldier who changes sides is counted on his new side from the next frame. Soldiers added or removed, deaths and movement within the frame are all seen at once. With the option off, the game's own loops run.
 
 Another mod that changes the counting inside these functions is bypassed while the option is on; turn the option off for such a mod. A pamphlet dropped in the very frame another decal is removed is noticed one frame later.
@@ -36,6 +42,7 @@ Some of the game's own loops are patched to do the same thing with less work:
 - **`slowedDown`.** It asked whether a soldier has the tactical buff once per ground area; it now asks once per call.
 - **Ground areas.** The game keeps trees, cover, water and buildings in one list and walks all of it to ask "is this soldier in a building?" or "is he on slow ground?". Those checks now look at the kind of area first and work out a distance only for an area that could matter. Explosion damage asked whether soldier and explosion share a building up to three times per soldier; it asks once.
 - **Explosions.** Every explosion checks every soldier on the map. The explosion's own building is now worked out once per explosion (and when it is in the open, no soldier's building is looked up), and the cover-save sound is copied only for a soldier it is played for. The random numbers are drawn as before.
+- **Gunner's target search.** A machine gunner looking for targets wrote a debug line for every enemy out of range, with the distance worked out again. The game prints that line for one soldier only, by name; the text is now put together only for him.
 - **Particle removal.** The game took each expired particle out with `table.remove`, moving every particle behind it; the lower the frame rate, the more expire per frame. They are now marked and taken out together when the update returns. One visible-in-theory difference: in the game, the particle behind an expired one skipped that frame's update; it no longer does.
 
 ## Finding out what is slow
@@ -44,6 +51,8 @@ Press **Ctrl+F11** in a battle that runs badly. PerfKit measures for 10 seconds 
 
 - frame times: average, 99th percentile and worst;
 - draw calls per frame, and how many more were merged by batching;
+- what is in play: soldiers, vehicles, particles, decals, the six most common particle types and how much settled debris is on the baked layer;
+- the graphics card, the number of processor threads and the window size, to compare reports from different computers;
 - per function: its own time per frame, its time including what it calls, and its calls per frame;
 - the functions called too often to time, with their calls per frame;
 - the slowest frame and which functions it went to, for hitches;

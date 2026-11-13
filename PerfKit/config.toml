@@ -34,7 +34,7 @@ id = "fast_proximity"
 label = "Faster Enemy-Nearby Checks"
 type = "checkbox"
 default = true
-description = "Counts the enemies near a soldier from a per-frame sorting of the soldiers instead of looking at every soldier on the map each time. A soldier who changes sides is counted on his new side one frame later"
+description = "Counts the enemies near a soldier, finds the front line and the nearest flagged enemy from a per-frame sorting of the soldiers instead of looking at every soldier on the map each time. A soldier who changes sides is counted on his new side one frame later"
 
 [[options]]
 id = "jit_cache"
