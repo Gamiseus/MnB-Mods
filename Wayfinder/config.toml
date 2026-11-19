@@ -10,6 +10,14 @@ description = "Infantry and vehicles route around obstacles and hazards instead 
 aliases = ["pathfindingEnabled"]
 
 [[options]]
+id = "player_soldiers"
+label = "Pathfinding For Your Soldiers"
+type = "checkbox"
+default = true
+description = "Your soldiers route around obstacles and hazards too. Off: they walk straight to where you send them, as in the game; the enemy and allied AI still use pathfinding"
+aliases = ["playerPathfindingEnabled"]
+
+[[options]]
 id = "safe_destination"
 label = "Safer Destinations"
 type = "checkbox"
@@ -24,6 +32,14 @@ type = "checkbox"
 default = true
 description = "Paths are solved on a second thread, so large squads do not stall the game"
 aliases = ["asyncPathsEnabled"]
+
+[[keybinds]]
+id = "wayfinder_direct_move"
+name = "Direct Move (hold while ordering)"
+category = "Orders"
+default = "x"
+tab = "Wayfinder"
+description = "Hold while giving a move order: the soldiers walk straight to the spot, through wire or anything else, with no detour. A later order without the key uses pathfinding again"
 
 [[keybinds]]
 id = "navgrid_overlay"

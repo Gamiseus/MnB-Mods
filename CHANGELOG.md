@@ -94,6 +94,13 @@ One changelog for every mod in this folder, grouped by mod. Each mod has its own
 
 ## Wayfinder
 
+### 1.1.0
+
+- added option: Pathfinding For Your Soldiers (on by default); off, the player's soldiers walk straight to where they are sent, as in the game, with no detour and no shifted destination; the enemy and allied AI still use pathfinding
+- added keybind: Direct Move (hold X while giving a move order); that order is walked straight, through wire, fire or anything else, and the next order without the key uses pathfinding again
+- fires are avoided as far out as they burn: a fire's size times 75 px (up to 150 px) plus a margin; before, large fires were skirted inside their burn radius, and orders into them were moved too short a way out
+- `pathfinding.movesDirect(unit)`, `captureOrder()`, `afterOrder(order)`, `fireRadius(fire)`
+
 ### 1.0.2
 
 - fixed soldiers spotting mines from far away: every mine in range was marked at once, skipping the game's pause between finds; mines are now spotted one at a time again, at the game's range

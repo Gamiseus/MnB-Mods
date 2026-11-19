@@ -79,6 +79,66 @@ local function settingOn(alias)
   return not (player and player["option_" .. alias] == 0)
 end
 
+-- ----------------------------------------------------------------------------
+-- The player's own soldiers
+-- ----------------------------------------------------------------------------
+-- unit -> true when the player's last move order to the soldier was a Direct Move (the key
+-- held): straight to the spot, no detours. Kept beside the unit, never saved.
+local directOrder = setmetatable({}, { __mode = "k" })
+
+-- The keybind held while giving a Direct Move order (config.toml).
+pathfinding.DIRECT_MOVE_ACTION = "wayfinder_direct_move"
+
+local function isPlayerSoldier(unit)
+  return unit.faction == "allied" and unit.playerControlled == 1
+    and unit.turret == nil and unit.pivotSpeed == nil
+end
+
+--- Whether the unit walks its order straight, as in the game, with no detour and no
+--- shifted destination: a player's soldier when "Pathfinding For Your Soldiers" is off, or
+--- one whose last order was a Direct Move. The enemy and allied AI always use pathfinding.
+function pathfinding.movesDirect(unit)
+  if not unit or not isPlayerSoldier(unit) then return false end
+  return directOrder[unit] == true or not settingOn("playerPathfindingEnabled")
+end
+
+local function directKeyHeld()
+  local input = QM and QM.Input
+  return input ~= nil and input.isDown ~= nil and input.isDown(pathfinding.DIRECT_MOVE_ACTION) == true
+end
+
+--- Just before the game hands out a move order: the soldiers about to get it, and whether
+--- the Direct Move key is held.
+function pathfinding.captureOrder()
+  local order = { direct = directKeyHeld() }
+  local troops = player and player.deployedTroops
+  if troops then
+    for i = 1, #troops do
+      local t = troops[i]
+      if t.selected and (t.onFire or 0) <= 0 then order[#order + 1] = t end
+    end
+  end
+  return order
+end
+
+--- Just after: every soldier the order went to (the game deselects them) walks it straight
+--- or by path, by whether the key was held.
+function pathfinding.afterOrder(order)
+  if not order or (altMove or 0) ~= 0 then return end
+  for i = 1, #order do
+    local t = order[i]
+    if not t.selected then
+      directOrder[t] = order.direct or nil
+    end
+  end
+end
+
+-- How far from a fire a unit is kept: the game burns a soldier within size * 75 px of a
+-- fire (fires grow to size 2, 150 px); a margin keeps paths between grid cells clear too.
+function pathfinding.fireRadius(f)
+  return math.max(34, (f.size or 0.5) * 75 + 16)
+end
+
 pathfinding.stats = {
   syncCount = 0,
   pathsComputed = 0,
@@ -456,8 +516,7 @@ function pathfinding.rebuildGrid()
     for i = 1, #player.fire do
       local f = player.fire[i]
       if f and f.x and f.y and (f.burnTime == nil or f.burnTime > 0) then
-        local frad = math.max(34, (f.size or 0.5) * 45 + 24)
-        markCircle(f.x, f.y, frad, function(idx)
+        markCircle(f.x, f.y, pathfinding.fireRadius(f), function(idx)
           if baseCosts[idx] > 0 and baseCosts[idx] < 18.0 then
             baseCosts[idx] = 18.0
           end
@@ -529,7 +588,7 @@ function pathfinding.findSafeDestination(wx, wy, unit)
       for i = 1, #player.fire do
         local f = player.fire[i]
         if f and f.x and f.y and (f.burnTime == nil or f.burnTime > 0) then
-          local rad = math.max(36, (f.size or 0.5) * 45 + 24)
+          local rad = pathfinding.fireRadius(f)
           if (x - f.x)^2 + (y - f.y)^2 < (rad * rad) then
             return false
           end
@@ -1541,6 +1600,13 @@ function pathfinding.getSteeringTarget(unit, dt)
     return unit and unit.x or 0, unit and unit.y or 0, false
   end
 
+  -- The player's soldier goes exactly where he was sent.
+  if pathfinding.movesDirect(unit) then
+    unit.pathQueue = nil
+    unit._pfGoalX, unit._pfGoalY = nil, nil
+    return unit.targetx, unit.targety, false
+  end
+
   -- Shift the destination if it is on a hazard or an unwalkable tile. Checked once per
   -- destination, not every frame.
   if settingOn("safeDestinationEnabled") then
@@ -1622,7 +1688,7 @@ end
 -- Prevent units from clipping inside strictly impassable barriers
 -- ----------------------------------------------------------------------------
 function pathfinding.resolveObstacleCollision(unit, prevX, prevY)
-  if not unit or not settingOn("pathfindingEnabled") then
+  if not unit or not settingOn("pathfindingEnabled") or pathfinding.movesDirect(unit) then
     return
   end
   local c, r = pathfinding.worldToGrid(unit.x, unit.y)
