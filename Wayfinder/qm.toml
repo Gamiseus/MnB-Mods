@@ -1,5 +1,5 @@
 [manifest]
-version = "1.0.1"
+version = "1.0.2"
 priority = 20
 
 [publish]
@@ -187,13 +187,15 @@ match_indent = true
 [patches.pattern]
 id = "wayfinder:mine_detected"
 target = "includes/urb_engine.lua"
-pattern = "checkCue(soldier.x, soldier.y, 33)"
+# After the game itself flags the mine. The game flags one mine at a time, so mines are
+# spotted at the game's pace and range.
+pattern = "floatyText(mine, mineDetectTxt)"
 position = "after"
+times = 1
 payload = '''
-            mine.flagged = 1
-            if pathfinding and pathfinding.invalidateHazards then
-              pathfinding.invalidateHazards()
-            end
+                if pathfinding and pathfinding.invalidateHazards then
+                  pathfinding.invalidateHazards()
+                end
 '''
 match_indent = true
 

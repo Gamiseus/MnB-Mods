@@ -94,6 +94,10 @@ One changelog for every mod in this folder, grouped by mod. Each mod has its own
 
 ## Wayfinder
 
+### 1.0.2
+
+- fixed soldiers spotting mines from far away: every mine in range was marked at once, skipping the game's pause between finds; mines are now spotted one at a time again, at the game's range
+
 ### 1.0.1
 
 - release zip holds a single `Wayfinder/` folder again (v2.0's zips had the files loose)

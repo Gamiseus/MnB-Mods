@@ -3,7 +3,7 @@
   "schema_version": 1,
   "id": "wayfinder",
   "name": "Wayfinder",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "game_version": ">=0.5.3",
   "authors": [
     "Gamiseus"
