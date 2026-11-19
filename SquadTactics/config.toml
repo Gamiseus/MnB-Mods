@@ -22,4 +22,4 @@ id = "combat_reactions"
 label = "React To Contact"
 type = "checkbox"
 default = true
-description = "Soldiers on a move order stop to return fire or run for cover when they meet the enemy, then carry on"
+description = "Soldiers on a move order who see the enemy stop, fire a couple of rounds, then carry on"

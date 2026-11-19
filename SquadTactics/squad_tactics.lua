@@ -4,7 +4,7 @@
 --
 -- For other mods (global SquadTactics):
 --   SquadTactics.Move       the squad move planner (see smart_move.lua)
---   SquadTactics.Reaction   contact reactions: clear(dude), isActive(dude)
+--   SquadTactics.Reaction   react to contact: clear(dude), isActive(dude)
 --   SquadTactics.squadLimit()
 
 local SquadTactics = {}
@@ -81,7 +81,7 @@ function SquadTactics.afterMoveOrder(batch, x, y)
   end
 end
 
---- Halt (H): the soldier stays put, so there is no order to come back to.
+--- Halt (H): the soldier stays put; a stop to fire ends with the order.
 function SquadTactics.onHalt(dude)
   SquadTactics.Reaction.clear(dude)
 end

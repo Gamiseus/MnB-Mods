@@ -126,6 +126,15 @@ One changelog for every mod in this folder, grouped by mod. Each mod has its own
 
 ## SquadTactics
 
+### 2.1.0
+
+- React To Contact rewritten: a soldier on a move order who sees the enemy stops, aims, fires a couple of rounds and carries on; while the enemy stays in sight he stops again every few seconds
+- the stop uses the game's own pause, so the order, its destination and the Wayfinder path are kept; nothing to resume
+- no more running for cover, veterans firing first, or waiting for the area to be clear
+- the soldier fires at the enemy he stopped for: semi-automatics and automatics get a burst to fire, and vehicles are aimed at as vehicles (before, the game dropped those targets and picked its own)
+- a soldier with an empty or jammed gun keeps moving; one pinned, retreating or panicking is left to the game
+- `SquadTactics.Reaction.BURST`, `MAX_STOP`, `COOLDOWN`; `NEAR_RANGE` and `COVER_RADIUS` removed
+
 ### 2.0.1
 
 - release zip holds a single `SquadTactics/` folder again (v2.0's zips had the files loose)
