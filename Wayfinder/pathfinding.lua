@@ -8,7 +8,14 @@
 
 local pathfinding = {}
 
-pathfinding.CELL_SIZE = 32
+pathfinding.CELL_SIZE = 16          -- px per grid cell
+pathfinding.BODY_RADIUS = 8         -- a soldier's half-width: the margin kept around solid things
+pathfinding.MARGIN_COST = 12        -- cost of a cell in that margin: avoided, but a way out of a tight spot
+pathfinding.CORRIDOR_MAX_COST = 4.0 -- a straight line between waypoints avoids cells costing this or more
+pathfinding.MAX_EXPANSIONS = 16000  -- A* cells looked at per path before the best partial path is used
+pathfinding.NEAREST_SEARCH = 24     -- cells searched outward for a free cell when start or goal is blocked
+pathfinding.UNSTICK_REPLAN = 0.4    -- s held back by an obstacle before the path is solved again
+pathfinding.UNSTICK_PASS = 2.0      -- s held back before the unit is let through, as the game would
 pathfinding.debugOverlay = false
 
 local SQRT2 = 1.4142135623730951
@@ -30,17 +37,88 @@ local OVERHEAD_ONLY_BUILDINGS = {
   antena = true
 }
 
-local BARRIER_PLACEABLES = {
-  dragonTooth = 24,
-  obstacle = 26,
-  palisade = 28,
-  barricade = 26,
-  hogBale1 = 24,
-  fence1 = 16,
-  fence2 = 16,
-  fence3 = 16,
-  achWall = 24
+-- Placeables a soldier cannot walk through, by the game's own names, with the box around
+-- each sprite's solid pixels: { x1, y1, x2, y2 } from the sprite's centre at the game's scale 1
+-- (size 10). The game draws a placeable centred on x, y, scaled by size / 10 and turned by
+-- its rotation, and the grid does the same. Measured from the game's sprites by
+-- tools/sprite_footprints.py. Infantry can walk over anything in the game itself; these are
+-- what Wayfinder routes around.
+local SOLID_PLACEABLES = {
+  dragonTooth = { -29.5, -26.5, 29.5, 25.5 },
+  obstacle = { -68, -70.5, 69, 71.5 },
+  hogBale1 = { -21.5, -19, 21.5, 19 },
+  hogBale2 = { -28.5, -33.5, 28.5, 33.5 },
+  hogBale3 = { -13, -50.5, 13, 50.5 },
+  barricade = { -67, -28, 60, 31 },
+  cartBarricade = { -60.5, -174.5, 60.5, 174.5 },
+  barrelWall1 = { -30.5, -72, 30.5, 73 },
+  barrelWall2 = { -38.5, -60.5, 40.5, 59.5 },
+  brestWall = { -20.5, -100, 20.5, 100 },
+  achWall = { -7, -50, 7, 50 },
+  fence1 = { -6.5, -49, 7.5, 48 },
+  fence2 = { -9, -50.5, 9, 50.5 },
+  fence3 = { -13, -50, 13, 49 },
+  palisade = { -16.5, -28.5, 16.5, 28.5 },
+  car = { -63.5, -36, 63.5, 36 },
+  tanker = { -52, -69, 52, 69 },
+  civilianTruck1 = { -120.5, -317, 120.5, 317 },
+  tractor = { -75.5, -61.5, 75.5, 61.5 },
+  cart = { -45.5, -26.5, 44.5, 25.5 },
+  bigCart = { -63, -29.5, 63, 29.5 },
+  cisternWagon = { -58, -174.5, 57, 173.5 },
+  trainArmored = { -51, -188.5, 49, 188.5 },
+  cannon = { -107, -191, 107, 191 },
+  radarBase = { -64, -31, 67, 68 },
+  radarBase2 = { -64, -31, 67, 68 },
+  brickStack = { -53, -92, 53, 92 },
+  woodPile1 = { -81, -24.5, 81, 24.5 },
+  plankPile = { -87, -26, 87, 26 },
+  hayStack = { -42, -16.5, 40, 16.5 },
+  hayBale = { -16.5, -14, 14.5, 14 },
+  crate1 = { -16.5, -17.5, 16.5, 16.5 },
+  crate2 = { -14, -12.5, 13, 12.5 },
+  crate3 = { -24, -10, 24, 10 },
+  crate4 = { -25.5, -13.5, 24.5, 12.5 },
+  crate5 = { -15.5, -24, 15.5, 24 },
+  crate6 = { -17.5, -16.5, 17.5, 16.5 },
+  barrel1 = { -10, -13.5, 10, 13.5 },
+  barrel2 = { -10, -11.5, 10, 11.5 },
+  wheelBarrow = { -29.5, -11, 28.5, 10 },
+  tomb1 = { -8, -19.5, 8, 19.5 },
+  tomb2 = { -10.5, -26.5, 10.5, 26.5 },
+  tomb3 = { -26, -26, 26, 26 },
+  tomb4 = { -61.5, -27, 61.5, 27 },
+  tomb7 = { -51, -23.5, 51, 23.5 },
+  tomb8 = { -48, -17, 48, 17 },
 }
+pathfinding.SOLID_PLACEABLES = SOLID_PLACEABLES
+
+-- Kinds of solid object, each with its own collision switch (config.toml, under Fine Tuned
+-- Collisions). A kind that does not stop soldiers is still something paths prefer to go
+-- round (VAULT_COST), and vehicles still go round it. Low walls and fences are off by
+-- default: the game lays them in lines across the map, as cover to climb over.
+pathfinding.COLLISION_KINDS = {
+  { alias = "collideDragonTeethEnabled", default = true, names = { "dragonTooth" } },
+  { alias = "collideHedgehogsEnabled", default = true, names = { "obstacle", "hogBale1", "hogBale2", "hogBale3" } },
+  { alias = "collideBarricadesEnabled", default = true, names = { "barricade", "cartBarricade" } },
+  { alias = "collideLowWallsEnabled", default = false, names = { "brestWall", "achWall", "barrelWall1", "barrelWall2" } },
+  { alias = "collideFencesEnabled", default = false, names = { "fence1", "fence2", "fence3" } },
+  { alias = "collidePalisadesEnabled", default = true, names = { "palisade" } },
+  { alias = "collideVehiclesEnabled", default = true, names = { "car", "tanker", "civilianTruck1", "tractor", "cart", "bigCart", "cisternWagon", "trainArmored" } },
+  { alias = "collideCannonsEnabled", default = true, names = { "cannon" } },
+  { alias = "collideRadarEnabled", default = true, names = { "radarBase", "radarBase2" } },
+  { alias = "collideStacksEnabled", default = true, names = { "brickStack", "woodPile1", "plankPile" } },
+  { alias = "collideHayEnabled", default = true, names = { "hayStack", "hayBale" } },
+  { alias = "collideCratesEnabled", default = true, names = { "crate1", "crate2", "crate3", "crate4", "crate5", "crate6", "barrel1", "barrel2", "wheelBarrow" } },
+  { alias = "collideTombsEnabled", default = true, names = { "tomb1", "tomb2", "tomb3", "tomb4", "tomb7", "tomb8" } },
+}
+local KIND_OF = {}
+for _, kind in ipairs(pathfinding.COLLISION_KINDS) do
+  for _, name in ipairs(kind.names) do KIND_OF[name] = kind end
+end
+pathfinding.VAULT_COST = 6.0          -- an object soldiers may cross: crossed when going round costs more
+pathfinding.BUILDING_COST = 4.0       -- a building cell on a path through it: at CORRIDOR_MAX_COST, so no
+                                      -- shortcut cuts through, and the way round wins unless far longer
 
 -- Cached nav-grid state
 local navGrid = {
@@ -48,8 +126,9 @@ local navGrid = {
   originY = 0,
   cols = 60,
   rows = 23,
-  cellSize = 32,
-  baseCosts = {},       -- flat array [1 .. cols*rows], <0 = impassable
+  cellSize = 16,
+  baseCosts = {},       -- flat array [1 .. cols*rows], <0 = impassable, MARGIN_COST = next to it
+  solid = {},           -- flat array [1 .. cols*rows], true = the object itself; what collision checks
   buildingIds = {},     -- flat array [1 .. cols*rows], >0 = building index
   treeIds = {},         -- flat array [1 .. cols*rows], >0 = forest tree index
   treeTrunkIds = {},    -- flat array [1 .. cols*rows], >0 = solid trunk center
@@ -73,10 +152,29 @@ local pendingUnitsByReqId = {}
 local pendingReqByUnit = setmetatable({}, { __mode = "k" })
 -- unit -> { x, y } of the last destination checked by findSafeDestination.
 local checkedGoal = setmetatable({}, { __mode = "k" })
+-- unit -> true when its path ends short of the destination (none goes all the way).
+local partialPath = setmetatable({}, { __mode = "k" })
+-- unit -> { x, y }: the destination it walks straight to across what is in the way, as the
+-- game lets it, after a path that ends short.
+local crossing = setmetatable({}, { __mode = "k" })
 
 local function settingOn(alias)
   -- Mod Settings mirror a checkbox to player.option_<alias> as 1 or 0. Unset means on.
   return not (player and player["option_" .. alias] == 0)
+end
+
+-- A checkbox with its own default when unset.
+local function setting(alias, default)
+  local v = player and player["option_" .. alias]
+  if v == nil then return default end
+  return v == 1 or v == true
+end
+
+--- Whether solid objects of this placeable name stop infantry, by the collision options.
+function pathfinding.collides(name)
+  local kind = KIND_OF[name]
+  if not kind or not setting("infantryCollisionEnabled", true) then return false end
+  return setting(kind.alias, kind.default)
 end
 
 -- ----------------------------------------------------------------------------
@@ -200,10 +298,10 @@ local function getBuildingFootprint(b, bIndex)
       local g = player.groundType[u]
       if g and g.cheeseID == b.cheeseID then
         if (g.width or 0) > 0 and (g.length or 0) > 0 then
-          return g.x, g.y, g.x + g.width, g.y + g.length, (b.impassable == 1 or b.noGoZone == 1)
+          return g.x, g.y, g.x + g.width, g.y + g.length
         elseif (g.radius or 0) > 0 then
           local rad = g.radius * 0.65
-          return g.x - rad, g.y - rad, g.x + rad, g.y + rad, (b.impassable == 1 or b.noGoZone == 1)
+          return g.x - rad, g.y - rad, g.x + rad, g.y + rad
         end
       end
     end
@@ -217,16 +315,16 @@ local function getBuildingFootprint(b, bIndex)
   if bw > 0 and bl > 0 then
     -- Check if (bx, by) is center or top-left
     if b.centered == false then
-      return bx, by, bx + bw, by + bl, (b.impassable == 1 or b.noGoZone == 1)
+      return bx, by, bx + bw, by + bl
     else
-      return bx - bw * 0.5, by - bl * 0.5, bx + bw * 0.5, by + bl * 0.5, (b.impassable == 1 or b.noGoZone == 1)
+      return bx - bw * 0.5, by - bl * 0.5, bx + bw * 0.5, by + bl * 0.5
     end
   end
 
   local rad = (b.radius or 90) * 0.45
   if rad < 28 then rad = 28 end
   if rad > 140 then rad = 140 end
-  return bx - rad, by - rad, bx + rad, by + rad, (b.impassable == 1 or b.noGoZone == 1)
+  return bx - rad, by - rad, bx + rad, by + rad
 end
 
 -- ----------------------------------------------------------------------------
@@ -250,11 +348,15 @@ function pathfinding.rebuildGrid()
 
   navGrid.originX = minX
   navGrid.originY = minY
+  -- What a building cell costs on a path through it; false when paths may only enter the
+  -- building they start or end in.
+  navGrid.throughBuildingCost = setting("pathThroughBuildingsEnabled", true) and pathfinding.BUILDING_COST or false
   navGrid.cols = cols
   navGrid.rows = rows
   navGrid.cellSize = cs
 
   local baseCosts = navGrid.baseCosts
+  local solid = navGrid.solid
   local buildingIds = navGrid.buildingIds
   local treeIds = navGrid.treeIds
   local treeTrunkIds = navGrid.treeTrunkIds
@@ -265,6 +367,7 @@ function pathfinding.rebuildGrid()
 
   for i = 1, totalCells do
     baseCosts[i] = 1.0
+    solid[i] = false
     buildingIds[i] = 0
     treeIds[i] = 0
     treeTrunkIds[i] = 0
@@ -308,21 +411,38 @@ function pathfinding.rebuildGrid()
     end
   end
 
-  -- 1. Roads (player.roads) -> lower cost (0.75)
-  if player.roads then
-    for i = 1, #player.roads do
-      local rd = player.roads[i]
-      if rd and rd.x and rd.y then
-        local rw = rd.width or rd.radius or 48
-        local rl = rd.length or rw
-        markRect(rd.x - rw * 0.5, rd.y - rl * 0.5, rd.x + rw * 0.5, rd.y + rl * 0.5, function(idx)
-          if baseCosts[idx] > 0.75 then baseCosts[idx] = 0.75 end
-        end)
+  -- Every cell a turned box touches, widened by pad. The box is in the object's own frame,
+  -- as the game draws it: centred on cx, cy, scaled, then turned by rot. A cell counts when
+  -- any part of it may be inside, so a thin wall is never missed between two cell centres.
+  local function markBox(cx, cy, box, scale, rot, pad, fn)
+    local x1, y1 = box[1] * scale - pad, box[2] * scale - pad
+    local x2, y2 = box[3] * scale + pad, box[4] * scale + pad
+    local cosR, sinR = math.cos(rot or 0), math.sin(rot or 0)
+    local reach = math.max(math.abs(x1), math.abs(x2)) + math.max(math.abs(y1), math.abs(y2))
+    local half = cs * 0.5
+    local slack2 = 2 * half * half -- half a cell's diagonal, squared
+    local c1 = math.max(1, math.floor((cx - reach - half - minX) / cs) + 1)
+    local c2 = math.min(cols, math.floor((cx + reach + half - minX) / cs) + 1)
+    local row1 = math.max(1, math.floor((cy - reach - half - minY) / cs) + 1)
+    local row2 = math.min(rows, math.floor((cy + reach + half - minY) / cs) + 1)
+    for r = row1, row2 do
+      local dy = minY + (r - 0.5) * cs - cy
+      local rowOffset = (r - 1) * cols
+      for c = c1, c2 do
+        local dx = minX + (c - 0.5) * cs - cx
+        -- The cell centre in the box's frame, and its distance to the box.
+        local u = dx * cosR + dy * sinR
+        local v = -dx * sinR + dy * cosR
+        local du = (u < x1 and x1 - u) or (u > x2 and u - x2) or 0
+        local dv = (v < y1 and y1 - v) or (v > y2 and v - y2) or 0
+        if du * du + dv * dv <= slack2 then
+          fn(rowOffset + c, c, r)
+        end
       end
     end
   end
 
-  -- 2. Forest (player.forest): Trunks (high cost/obstacle) & Canopies (moderate brush avoidance)
+  -- 1. Forest (player.forest): Trunks (high cost/obstacle) & Canopies (moderate brush avoidance)
   if player.forest then
     for i = 1, #player.forest do
       local f = player.forest[i]
@@ -348,7 +468,7 @@ function pathfinding.rebuildGrid()
     end
   end
 
-  -- 3. GroundType zones (cover, mud, water, wire, entanglement, bunkers, buildings)
+  -- 2. Ground areas (player.groundType): cover, mud, water, wire, entanglement, floors
   if player.groundType then
     for u = 1, #player.groundType do
       local g = player.groundType[u]
@@ -356,14 +476,8 @@ function pathfinding.rebuildGrid()
         local gname = g.name or ""
         local gcov = g.cover or 0
         local gslow = (g.slowy == "yes") or ((g.incline or 0) ~= 0)
-        local gimpassable = (g.impassable == 1 or g.noGoZone == 1 or g.deep == 1)
 
         local applyCell = function(idx)
-          if gimpassable then
-            baseCosts[idx] = -1
-            vehicleBlocked[idx] = true
-            return
-          end
           if baseCosts[idx] < 0 then return end
 
           if gname == "wire" or gname == "entanglement" then
@@ -376,9 +490,6 @@ function pathfinding.rebuildGrid()
             vehicleBlocked[idx] = true
           elseif gslow or gname == "mud" then
             if baseCosts[idx] < 2.0 then baseCosts[idx] = 2.0 end
-          elseif gname == "road" or gname == "cobble" then
-            if baseCosts[idx] > 0.75 then baseCosts[idx] = 0.75 end
-            vehicleBlocked[idx] = false
           elseif gcov > 0 then
             -- Trenches, craters, sandbags, bunkers
             if gname == "concrete" and gcov > 40 then
@@ -411,107 +522,81 @@ function pathfinding.rebuildGrid()
     end
   end
 
-  -- 4. Buildings (player.buildings)
+  -- 3. Buildings (player.buildings)
   if player.buildings then
     for i = 1, #player.buildings do
       local b = player.buildings[i]
-      local x1, y1, x2, y2, strictBlock = getBuildingFootprint(b, i)
+      local x1, y1, x2, y2 = getBuildingFootprint(b, i)
       if x1 then
         markRect(x1 - 6, y1 - 6, x2 + 6, y2 + 6, function(idx)
           vehicleBlocked[idx] = true
           buildingIds[idx] = i
-          if strictBlock then
-            baseCosts[idx] = -1
-          end
         end)
       end
     end
   end
 
-  -- 5. Deco noGoZones / cliff boulders (player.deco)
-  if player.deco then
-    for i = 1, #player.deco do
-      local d = player.deco[i]
-      if d and (d.noGoZone == 1 or d.impassable == 1) and d.x and d.y then
-        if (d.width or 0) > 0 and (d.length or 0) > 0 then
-          markRect(d.x, d.y, d.x + d.width, d.y + d.length, function(idx)
-            baseCosts[idx] = -1
-            vehicleBlocked[idx] = true
-          end)
-        else
-          local drad = d.radius or 32
-          markCircle(d.x, d.y, drad, function(idx)
-            baseCosts[idx] = -1
-            vehicleBlocked[idx] = true
-          end)
-        end
-      end
-    end
-  end
-
-  -- Rocks (player.rocks) -> impassable boulders
+  -- 4. Rocks (player.rocks): the game lets soldiers stand on them (stepOnRock), so only
+  -- vehicles go around, within the game's own rock radius.
   if player.rocks then
     for i = 1, #player.rocks do
       local r = player.rocks[i]
       if r and r.x and r.y then
-        local rrad = ((50 * (r.size or 10)) / 10) * 0.85
-        markCircle(r.x, r.y, rrad, function(idx)
-          baseCosts[idx] = -1
+        markCircle(r.x, r.y, (50 * (r.size or 10)) / 10, function(idx)
           vehicleBlocked[idx] = true
         end)
       end
     end
   end
 
-  -- Impassable LOS Blockers / Cliffs (player.losBlockers)
-  if player.losBlockers then
-    for i = 1, #player.losBlockers do
-      local lb = player.losBlockers[i]
-      if lb and lb.x and lb.y and (lb.type ~= "smoke" or lb.impassable == 1) then
-        markCircle(lb.x, lb.y, lb.radius or 40, function(idx)
-          baseCosts[idx] = -1
-          vehicleBlocked[idx] = true
-        end)
-      end
-    end
-  end
-
-  -- 6. Placeables: barriers (dragonTooth, palisade, barricade, obstacle) & mines
+  -- 5. Placeables (player.placeables): solid objects by their sprites, and wire
   if player.placeables then
+    local pad = pathfinding.BODY_RADIUS
+    local marginCost = pathfinding.MARGIN_COST
+    local function margin(idx)
+      vehicleBlocked[idx] = true
+      if baseCosts[idx] > 0 and baseCosts[idx] < marginCost then baseCosts[idx] = marginCost end
+    end
+    local function core(idx)
+      solid[idx] = true
+      baseCosts[idx] = -1
+      vehicleBlocked[idx] = true
+    end
+    local vaultCost = pathfinding.VAULT_COST
+    local function vehicleOnly(idx) vehicleBlocked[idx] = true end
+    local function vault(idx)
+      vehicleBlocked[idx] = true
+      if baseCosts[idx] > 0 and baseCosts[idx] < vaultCost then baseCosts[idx] = vaultCost end
+    end
+    local collides = {}
+    for name in pairs(SOLID_PLACEABLES) do collides[name] = pathfinding.collides(name) end
     for i = 1, #player.placeables do
       local p = player.placeables[i]
+      -- The game parks hidden placeables far off the map.
       if p and p.x and p.y and p.x < 9000 then
         local pname = p.name or ""
-        local barrierRad = BARRIER_PLACEABLES[pname]
-        if p.noGoZone == 1 or p.impassable == 1 then
-          barrierRad = p.radius or 32
-        end
-        if barrierRad then
-          markCircle(p.x, p.y, barrierRad, function(idx)
-            baseCosts[idx] = -1
-            vehicleBlocked[idx] = true
-          end)
-        elseif pname == "barbedWire" or pname == "wire" or pname == "entanglement" or string.find(pname, "Wire") or string.find(pname, "wire") then
+        local box = SOLID_PLACEABLES[pname]
+        if box then
+          local scale = (tonumber(p.size) or 10) / 10
+          if collides[pname] then
+            markBox(p.x, p.y, box, scale, p.rotation or 0, pad, margin)
+            markBox(p.x, p.y, box, scale, p.rotation or 0, 0, core)
+          else
+            markBox(p.x, p.y, box, scale, p.rotation or 0, pad, vehicleOnly)
+            markBox(p.x, p.y, box, scale, p.rotation or 0, 0, vault)
+          end
+        elseif pname == "barbWire" or pname == "entanglement" then
           markCircle(p.x, p.y, p.radius or 36, function(idx)
             if baseCosts[idx] > 0 and baseCosts[idx] < 6.5 then
               baseCosts[idx] = 6.5
             end
           end)
-        elseif string.find(pname, "Mine") or string.find(pname, "mine") then
-          -- Known/flagged mines get high avoidance cost
-          if (p.flagged or 0) > 0 or p.faction == "allied" or p.known == 1 then
-            markCircle(p.x, p.y, 40, function(idx)
-              if baseCosts[idx] > 0 and baseCosts[idx] < 22.0 then
-                baseCosts[idx] = 22.0
-              end
-            end)
-          end
         end
       end
     end
   end
 
-  -- 7. Active fires (player.fire) -> strong hazard avoidance (cost = 18.0)
+  -- 6. Active fires (player.fire) -> strong hazard avoidance (cost = 18.0)
   if player.fire then
     for i = 1, #player.fire do
       local f = player.fire[i]
@@ -525,7 +610,7 @@ function pathfinding.rebuildGrid()
     end
   end
 
-  -- 8. Minefield hazards (player.mineField)
+  -- 7. Minefield hazards (player.mineField)
   -- Detected / friendly mines get extreme penalty to steer around them safely
   if player.mineField then
     for i = 1, #player.mineField do
@@ -625,11 +710,59 @@ end
 -- ----------------------------------------------------------------------------
 -- Ensure the Nav-Grid is fresh
 -- ----------------------------------------------------------------------------
+-- A cheap summary of what the grid is built from that changes during a battle. The grid is
+-- rebuilt, and sent to the worker again, only when it differs: at 16 px a grid is large.
+local function worldSignature()
+  local h = 0
+  local function mix(v) h = (h * 31 + v) % 2147483647 end
+  mix(player.placeables and #player.placeables or 0)
+  mix(player.buildings and #player.buildings or 0)
+  mix(player.groundType and #player.groundType or 0)
+  mix(player.forest and #player.forest or 0)
+  mix(player.rocks and #player.rocks or 0)
+  mix(math.floor(player.endLine or 0))
+  mix(setting("infantryCollisionEnabled", true) and 1 or 0)
+  mix(setting("pathThroughBuildingsEnabled", true) and 1 or 0)
+  for _, kind in ipairs(pathfinding.COLLISION_KINDS) do mix(setting(kind.alias, kind.default) and 1 or 0) end
+  local fires = player.fire
+  if fires then
+    for i = 1, #fires do
+      local f = fires[i]
+      if f.burnTime == nil or f.burnTime > 0 then
+        mix(math.floor((f.x or 0) + (f.y or 0) * 7 + (f.size or 0) * 1000))
+      end
+    end
+  end
+  local mines = player.mineField
+  if mines then
+    for i = 1, #mines do
+      local m = mines[i]
+      if (m.flagged or 0) > 0 then mix(math.floor((m.x or 0) + (m.y or 0) * 7)) end
+    end
+  end
+  local buildings = player.buildings
+  if buildings then
+    for i = 1, #buildings do
+      if (buildings[i].destroyed or 0) >= 1 then mix(i) end
+    end
+  end
+  return h
+end
+
 function pathfinding.ensureSynced(force)
   if not player then return end
   local now = player.missionTime or 0
-  if force or navGrid.dirty or math.abs(now - navGrid.lastSyncTime) >= 0.75 then
+  if force or navGrid.dirty then
+    navGrid.signature = worldSignature()
     pathfinding.rebuildGrid()
+  elseif math.abs(now - navGrid.lastSyncTime) >= 0.75 then
+    local sig = worldSignature()
+    if sig ~= navGrid.signature then
+      navGrid.signature = sig
+      pathfinding.rebuildGrid()
+    else
+      navGrid.lastSyncTime = now
+    end
   end
 end
 
@@ -685,8 +818,10 @@ local function getEffectiveCellCost(idx, unit, isVehicle, startBldId, goalBldId,
       if base < 6.0 then
         return 0.85
       end
+    elseif navGrid.throughBuildingCost then
+      -- Through another building: allowed, at a cost, so a short way round still wins.
+      if base < navGrid.throughBuildingCost then base = navGrid.throughBuildingCost end
     else
-      -- Otherwise, block cutting straight through a building interior when moving past it
       return -1
     end
   end
@@ -736,10 +871,12 @@ end
 local function isCorridorClear(c1, r1, c2, r2, unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree)
   local dc = c2 - c1
   local dr = r2 - r1
-  local steps = math.max(math.abs(dc), math.abs(dr)) * 2
+  -- Four looks per cell crossed, so a line does not slip past a blocked cell's corner.
+  local steps = math.max(math.abs(dc), math.abs(dr)) * 4
   if steps <= 1 then return true end
   local cols = navGrid.cols
   local rows = navGrid.rows
+  local maxCost = pathfinding.CORRIDOR_MAX_COST
   for s = 1, steps - 1 do
     local t = s / steps
     local cc = math.floor(c1 + dc * t + 0.5)
@@ -749,9 +886,25 @@ local function isCorridorClear(c1, r1, c2, r2, unit, isVehicle, startBldId, goal
     end
     local idx = (rr - 1) * cols + cc
     local cost = getEffectiveCellCost(idx, unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree)
-    if cost < 0 or cost >= 2.2 then
+    if cost < 0 or cost >= maxCost then
       return false
     end
+  end
+  return true
+end
+
+-- Whether a straight line between two world points stays clear, for this unit: looked at
+-- every quarter cell, so the unit's exact position counts, not its cell's centre.
+local function isLineClear(x1, y1, x2, y2, unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree)
+  local cs = navGrid.cellSize
+  local dx, dy = x2 - x1, y2 - y1
+  local steps = math.ceil(math.sqrt(dx * dx + dy * dy) / (cs * 0.25))
+  local maxCost = pathfinding.CORRIDOR_MAX_COST
+  for s = 0, steps do
+    local t = steps > 0 and s / steps or 0
+    local c, r = pathfinding.worldToGrid(x1 + dx * t, y1 + dy * t)
+    local cost = getEffectiveCellCost(cellIndex(c, r), unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree)
+    if cost < 0 or cost >= maxCost then return false end
   end
   return true
 end
@@ -803,7 +956,7 @@ local function findNearestWalkableCell(c, r, unit, isVehicle, startBldId, goalBl
     return c, r
   end
 
-  for rad = 1, 10 do
+  for rad = 1, pathfinding.NEAREST_SEARCH do
     local bestC, bestR, bestDist = nil, nil, math.huge
     for dr = -rad, rad do
       for dc = -rad, rad do
@@ -873,12 +1026,14 @@ function pathfinding.computePath(startX, startY, goalX, goalY, unit)
   end
 
   -- Fast path: if straight corridor is clear, return direct single waypoint
-  if isCorridorClear(sc, sr, gc, gr, unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree) then
+  if isCorridorClear(sc, sr, gc, gr, unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree)
+    and isLineClear(startX, startY, goalX, goalY, unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree) then
     pathfinding.stats.directPaths = pathfinding.stats.directPaths + 1
     return { { x = goalX, y = goalY } }, true
   end
 
   local origGc, origGr = gc, gr
+  local origSc, origSr = sc, sr
   sc, sr = findNearestWalkableCell(sc, sr, unit, isVehicle, startBldId, goalBldId, wireCutter)
   gc, gr = findNearestWalkableCell(gc, gr, unit, isVehicle, startBldId, goalBldId, wireCutter)
   local goalAdjusted = (gc ~= origGc or gr ~= origGr)
@@ -950,7 +1105,7 @@ function pathfinding.computePath(startX, startY, goalX, goalY, unit)
     return topNode
   end
 
-  local maxExpansions = 3500
+  local maxExpansions = pathfinding.MAX_EXPANSIONS
   local expansions = 0
   local bestFallbackIdx = startIdx
   local bestFallbackH = heapF[1]
@@ -1070,6 +1225,15 @@ function pathfinding.computePath(startX, startY, goalX, goalY, unit)
     waypoints[1] = { x = wx, y = wy }
   end
 
+  -- The path runs from the start cell's centre. When the unit stands in an obstacle's margin,
+  -- or the first leg from where it really stands is not clear, it steps to that centre first.
+  local first = waypoints[1]
+  if sc ~= origSc or sr ~= origSr
+    or not isLineClear(startX, startY, first.x, first.y, unit, isVehicle, startBldId, goalBldId, wireCutter, goalInTree) then
+    local wx, wy = pathfinding.gridToWorld(sc, sr)
+    table.insert(waypoints, 1, { x = wx, y = wy })
+  end
+
   return waypoints, (targetIdx == goalIdx)
 end
 
@@ -1122,10 +1286,11 @@ local function octileHeuristic(cx, cy, gx, gy)
   end
 end
 
-local function isCorridorClear(costs, cols, rows, c1, r1, c2, r2)
+local function isCorridorClear(costs, cols, rows, c1, r1, c2, r2, maxCost)
   local dc = c2 - c1
   local dr = r2 - r1
-  local steps = math.max(math.abs(dc), math.abs(dr)) * 2
+  -- Four looks per cell crossed, so a line does not slip past a blocked cell's corner.
+  local steps = math.max(math.abs(dc), math.abs(dr)) * 4
   if steps <= 1 then return true end
   for s = 1, steps - 1 do
     local t = s / steps
@@ -1135,9 +1300,27 @@ local function isCorridorClear(costs, cols, rows, c1, r1, c2, r2)
       return false
     end
     local cost = costs[(rr - 1) * cols + cc] or 1.0
-    if cost < 0 or cost >= 4.0 then
+    if cost < 0 or cost >= maxCost then
       return false
     end
+  end
+  return true
+end
+
+-- Whether a straight line between two world points stays clear, looked at every quarter cell.
+local function isLineClear(costs, g, x1, y1, x2, y2)
+  local cs, cols, rows = g.cellSize or 16, g.cols, g.rows
+  local ox, oy = g.originX or 0, g.originY or 0
+  local maxCost = g.corridorMaxCost or 4.0
+  local dx, dy = x2 - x1, y2 - y1
+  local steps = math.ceil(math.sqrt(dx * dx + dy * dy) / (cs * 0.25))
+  for s = 0, steps do
+    local t = steps > 0 and s / steps or 0
+    local c = math.floor((x1 + dx * t - ox) / cs) + 1
+    local r = math.floor((y1 + dy * t - oy) / cs) + 1
+    if c < 1 or c > cols or r < 1 or r > rows then return false end
+    local cost = costs[(r - 1) * cols + c] or 1.0
+    if cost < 0 or cost >= maxCost then return false end
   end
   return true
 end
@@ -1158,6 +1341,8 @@ local function unitCellCost(g, job, idx)
     if isVehicle then return -1 end
     if bId == job.startBldId or bId == job.goalBldId then
       if base < 6.0 then return 0.85 end
+    elseif g.throughBuildingCost then
+      if base < g.throughBuildingCost then base = g.throughBuildingCost end
     else
       return -1
     end
@@ -1188,7 +1373,7 @@ local function solveAStar(job)
   end
   local cols = g.cols
   local rows = g.rows
-  local cellSize = g.cellSize or 32
+  local cellSize = g.cellSize or 16
   local originX = g.originX or 0
   local originY = g.originY or 0
   -- Costs are worked out when first asked for and kept for the rest of this request.
@@ -1217,7 +1402,7 @@ local function solveAStar(job)
   local function findNearestWalkable(c, r)
     local idx = (r - 1) * cols + c
     if (costs[idx] or 1.0) > 0 then return c, r end
-    for rad = 1, 8 do
+    for rad = 1, g.nearestSearch or 24 do
       local bestC, bestR, bestDist = nil, nil, math.huge
       for dr = -rad, rad do
         for dc = -rad, rad do
@@ -1241,6 +1426,7 @@ local function solveAStar(job)
     return c, r
   end
 
+  local origSc, origSr = sc, sr
   sc, sr = findNearestWalkable(sc, sr)
   gc, gr = findNearestWalkable(gc, gr)
 
@@ -1307,7 +1493,7 @@ local function solveAStar(job)
     return topNode
   end
 
-  local maxExpansions = job.maxExpansions or 4000
+  local maxExpansions = g.maxExpansions or 16000
   local expansions = 0
   local bestFallbackIdx = startIdx
   local bestFallbackH = heapF[1]
@@ -1397,7 +1583,7 @@ local function solveAStar(job)
   while anchor < n do
     local furthest = anchor + 1
     for probe = n, anchor + 2, -1 do
-      if isCorridorClear(costs, cols, rows, ordered[anchor].c, ordered[anchor].r, ordered[probe].c, ordered[probe].r) then
+      if isCorridorClear(costs, cols, rows, ordered[anchor].c, ordered[anchor].r, ordered[probe].c, ordered[probe].r, g.corridorMaxCost or 4.0) then
         furthest = probe
         break
       end
@@ -1418,6 +1604,14 @@ local function solveAStar(job)
 
   if #waypoints == 0 then
     waypoints[1] = { x = job.goalX, y = job.goalY }
+  end
+
+  -- The path runs from the start cell's centre. When the unit stands in an obstacle's margin,
+  -- or the first leg from where it really stands is not clear, it steps to that centre first.
+  local first = waypoints[1]
+  if sc ~= origSc or sr ~= origSr or not isLineClear(costs, g, job.startX, job.startY, first.x, first.y) then
+    local wx, wy = gridToWorld(sc, sr)
+    table.insert(waypoints, 1, { x = wx, y = wy })
   end
 
   return (targetIdx == goalIdx), waypoints
@@ -1525,6 +1719,10 @@ function pathfinding.requestPathAsync(unit, startX, startY, goalX, goalY)
       cols = cols,
       rows = rows,
       cellSize = navGrid.cellSize,
+      maxExpansions = pathfinding.MAX_EXPANSIONS,
+      nearestSearch = pathfinding.NEAREST_SEARCH,
+      corridorMaxCost = pathfinding.CORRIDOR_MAX_COST,
+      throughBuildingCost = navGrid.throughBuildingCost,
       originX = navGrid.originX,
       originY = navGrid.originY,
       baseCosts = navGrid.baseCosts,
@@ -1583,6 +1781,7 @@ function pathfinding.pollAsyncResults()
         and (tx - msg.goalX) * (tx - msg.goalX) + (ty - msg.goalY) * (ty - msg.goalY) <= 256
       if newest and current and msg.waypoints then
         unit.pathQueue = msg.waypoints
+        partialPath[unit] = (msg.found == false) or nil
         unit._pfGoalX = msg.goalX
         unit._pfGoalY = msg.goalY
         unit._pfSnapTurn = true
@@ -1631,6 +1830,16 @@ function pathfinding.getSteeringTarget(unit, dt)
   local tx, ty = unit.targetx, unit.targety
   local ux, uy = unit.x, unit.y
 
+  -- Crossing to a destination no path reaches: straight on.
+  local cross = crossing[unit]
+  if cross then
+    if cross.x == tx and cross.y == ty then
+      unit.pathQueue = nil
+      return tx, ty, false
+    end
+    crossing[unit] = nil
+  end
+
   -- Check if destination changed or periodic hazard re-check is due
   local goalChanged = (not unit._pfGoalX) or (not unit._pfGoalY)
     or ((tx - unit._pfGoalX) * (tx - unit._pfGoalX) + (ty - unit._pfGoalY) * (ty - unit._pfGoalY) > 256)
@@ -1647,7 +1856,9 @@ function pathfinding.getSteeringTarget(unit, dt)
       if goalChanged then unit.pathQueue = nil end
       pathfinding.requestPathAsync(unit, ux, uy, tx, ty)
     else
-      unit.pathQueue = pathfinding.computePath(ux, uy, tx, ty, unit)
+      local found
+      unit.pathQueue, found = pathfinding.computePath(ux, uy, tx, ty, unit)
+      partialPath[unit] = (found == false) or nil
       unit._pfSnapTurn = true
     end
   end
@@ -1658,7 +1869,8 @@ function pathfinding.getSteeringTarget(unit, dt)
   end
 
   local wp = q[1]
-  local reachRadius = (unit.turret ~= nil or unit.pivotSpeed ~= nil) and 38 or 16
+  -- Infantry turn close to a waypoint: cutting the corner early would clip what it goes round.
+  local reachRadius = (unit.turret ~= nil or unit.pivotSpeed ~= nil) and 38 or 6
   local snapTurn = false
   if unit._pfSnapTurn then
     snapTurn = true
@@ -1681,33 +1893,93 @@ function pathfinding.getSteeringTarget(unit, dt)
     return tx, ty, snapTurn
   end
 
-  return wp.x, wp.y, snapTurn
+  -- At the end of a path that stops short: no way round, so the unit crosses what is in the
+  -- way, as the game itself lets it, instead of standing there.
+  if #q == 1 and partialPath[unit] then
+    local dx, dy = wp.x - ux, wp.y - uy
+    if dx * dx + dy * dy <= reachRadius * reachRadius then
+      crossing[unit] = { x = tx, y = ty }
+      unit.pathQueue = nil
+      return tx, ty, true
+    end
+  end
+
+  -- On a path the unit aims at its waypoint every frame. The game only turns a walking
+  -- soldier now and then; drifting off a path that passes an obstacle runs him into it.
+  return wp.x, wp.y, true
 end
 
 -- ----------------------------------------------------------------------------
 -- Prevent units from clipping inside strictly impassable barriers
 -- ----------------------------------------------------------------------------
+-- unit -> { held = seconds held back lately, through = seconds left walking through }.
+-- Kept beside the unit, never saved.
+local unstick = setmetatable({}, { __mode = "k" })
+
+local function frameTime()
+  local dt = love and love.timer and love.timer.getDelta and love.timer.getDelta()
+  if not dt or dt <= 0 or dt > 0.25 then dt = 1 / 60 end
+  return dt
+end
+
+--- After the game moved a soldier: keeps him out of solid cells by sliding along them. A
+--- soldier held back for UNSTICK_REPLAN seconds gets his path solved again from where he
+--- stands; one held back for UNSTICK_PASS seconds is let through for a moment, as the game
+--- itself would. Nobody stays stuck on an obstacle.
 function pathfinding.resolveObstacleCollision(unit, prevX, prevY)
   if not unit or not settingOn("pathfindingEnabled") or pathfinding.movesDirect(unit) then
     return
   end
+  local cross = crossing[unit]
+  if cross and cross.x == unit.targetx and cross.y == unit.targety then return end
+  local st = unstick[unit]
+  local dt = frameTime()
+  if st and st.through > 0 then
+    st.through = st.through - dt
+    return
+  end
+  -- Paths keep BODY_RADIUS clear of objects; the collision only stops a step into the
+  -- object itself, so brushing the margin costs nothing.
+  local solid = navGrid.solid
   local c, r = pathfinding.worldToGrid(unit.x, unit.y)
-  local idx = cellIndex(c, r)
-  if (navGrid.baseCosts[idx] or 1.0) < 0 then
-    -- If previous position was valid, slide along X or Y axis
+  local wantX, wantY = unit.x, unit.y
+  if solid[cellIndex(c, r)] then
+    -- Only a step into a solid cell is undone; a soldier already inside one walks out.
     local pc, pr = pathfinding.worldToGrid(prevX, prevY)
-    if (navGrid.baseCosts[cellIndex(pc, pr)] or 1.0) > 0 then
+    if not solid[cellIndex(pc, pr)] then
       local cxOnly, rPrev = pathfinding.worldToGrid(unit.x, prevY)
       local cPrev, ryOnly = pathfinding.worldToGrid(prevX, unit.y)
-      if (navGrid.baseCosts[cellIndex(cxOnly, rPrev)] or 1.0) > 0 then
+      if not solid[cellIndex(cxOnly, rPrev)] then
         unit.y = prevY
-      elseif (navGrid.baseCosts[cellIndex(cPrev, ryOnly)] or 1.0) > 0 then
+      elseif not solid[cellIndex(cPrev, ryOnly)] then
         unit.x = prevX
       else
         unit.x = prevX
         unit.y = prevY
       end
     end
+  end
+
+  -- Held back: he got less than half of the step he took.
+  local want = (wantX - prevX) ^ 2 + (wantY - prevY) ^ 2
+  local got = (unit.x - prevX) ^ 2 + (unit.y - prevY) ^ 2
+  if want > 0 and got < want * 0.25 then
+    if not st then
+      st = { held = 0, through = 0, replanned = false }
+      unstick[unit] = st
+    end
+    st.held = st.held + dt
+    if st.held >= pathfinding.UNSTICK_PASS then
+      unit.x, unit.y = wantX, wantY
+      st.held, st.through, st.replanned = 0, 1.0, false
+    elseif st.held >= pathfinding.UNSTICK_REPLAN and not st.replanned then
+      st.replanned = true
+      unit.pathQueue = nil
+      unit._pfGoalX, unit._pfGoalY = nil, nil
+    end
+  elseif st then
+    st.held = math.max(0, st.held - dt)
+    if st.held == 0 then st.replanned = false end
   end
 end
 

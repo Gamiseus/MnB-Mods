@@ -94,6 +94,23 @@ One changelog for every mod in this folder, grouped by mod. Each mod has its own
 
 ## Wayfinder
 
+### 1.2.0
+
+- fixed soldiers getting stuck on dragon's teeth and other objects: the push-back that keeps them out of solid objects could pin a soldier in place for good; now a soldier held back gets a new path from where he stands, and one still held back after 2 s steps across, as the game itself allows
+- fixed soldiers standing still at the end of a path that cannot reach their destination (objects closing it off); they now cross the rest
+- grid cells are 16 px instead of 32, and an object marks every cell it touches, so thin walls and fences leave no gaps
+- solid objects use the game's own placeable names and the size of their sprites, scaled and turned as the game draws them; added barrel and breastwork walls, cart barricades, cars, carts, trucks, tractors, wagons, cannons, radar bases, stacks and piles, hay, crates, barrels, wheelbarrows and tombs
+- a soldier's width is kept clear round solid objects, and the collision only stops a step into the object itself, so paths no longer brush and snag on them
+- soldiers on a path aim at their next waypoint every frame and turn close to it, instead of drifting into what the path goes round
+- rocks are walkable for soldiers, as in the game; vehicles still go round
+- added option: Infantry Collision (on by default); off, soldiers can cross any object, as in the game, while paths still prefer to go round
+- added options: Fine Tuned Collisions, a submenu with one switch per kind of object (Dragon's Teeth, Hedgehogs And Obstacles, Barricades, Low Walls, Fences, Palisades, Vehicles And Wagons, Cannons, Radar Bases, Stacks And Piles, Hay, Crates And Barrels, Tombs); Low Walls and Fences are off by default, since maps lay them in lines as cover to climb over; vehicles go round every kind
+- added option: Path Through Buildings (on by default); paths may lead through a building when going round is far longer; before, soldiers could only enter the building they started in or were sent to
+- needs QuarterMaster 2.0.2 or newer, for the Fine Tuned Collisions submenu
+- removed grid rules for things the game does not have (a roads table, impassable and no-go fields, mines among placeables, sight blockers other than smoke)
+- the grid is rebuilt only when something it is built from changed, instead of every second
+- `pathfinding.SOLID_PLACEABLES`, `COLLISION_KINDS`, `collides(name)`, `BODY_RADIUS`, `MARGIN_COST`, `VAULT_COST`, `BUILDING_COST`, `CORRIDOR_MAX_COST`, `MAX_EXPANSIONS`, `NEAREST_SEARCH`, `UNSTICK_REPLAN`, `UNSTICK_PASS`
+
 ### 1.1.0
 
 - added option: Pathfinding For Your Soldiers (on by default); off, the player's soldiers walk straight to where they are sent, as in the game, with no detour and no shifted destination; the enemy and allied AI still use pathfinding

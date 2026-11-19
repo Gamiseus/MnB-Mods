@@ -5,3 +5,4 @@ __pycache__/
 # Release zips (tools/package_mods.py writes them to dist/).
 /dist/
 /*.zip
+/tools

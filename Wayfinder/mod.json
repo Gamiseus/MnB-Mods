@@ -3,12 +3,12 @@
   "schema_version": 1,
   "id": "wayfinder",
   "name": "Wayfinder",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "game_version": ">=0.5.3",
   "authors": [
     "Gamiseus"
   ],
-  "description": "A* pathfinding for infantry and vehicles. Units route around trees, rocks, buildings, wire, fire and known mines, with paths solved on a background thread. Changes how units move.",
+  "description": "A* pathfinding for infantry and vehicles. Units route around solid objects, buildings, trees, wire, fire and known mines, with paths solved on a background thread. Changes how units move.",
   "category": "Gameplay",
   "tags": [
     "Pathfinding",
@@ -25,6 +25,7 @@
     }
   },
   "qm_features": [
-    "apply_as"
+    "apply_as",
+    "config_submenus"
   ]
 }

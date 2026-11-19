@@ -18,6 +18,145 @@ description = "Your soldiers route around obstacles and hazards too. Off: they w
 aliases = ["playerPathfindingEnabled"]
 
 [[options]]
+id = "infantry_collision"
+label = "Infantry Collision"
+type = "checkbox"
+default = true
+description = "Solid objects stop soldiers, who walk round them. Off: soldiers can cross anything, as in the game; paths still prefer to go round"
+aliases = ["infantryCollisionEnabled"]
+
+[[options]]
+id = "path_through_buildings"
+label = "Path Through Buildings"
+type = "checkbox"
+default = true
+description = "Paths may lead through a building when walking round it is far longer. Off: soldiers only enter the building they start in or are sent to"
+aliases = ["pathThroughBuildingsEnabled"]
+
+[[options]]
+id = "fine_tuned_collisions"
+label = "Fine Tuned Collisions"
+type = "submenu"
+description = "A switch for each kind of object: on, it stops soldiers; off, they can cross it. Vehicles go round all of them"
+
+[[options]]
+id = "collide_dragon_teeth"
+label = "Dragon's Teeth"
+type = "checkbox"
+default = true
+description = "Concrete dragon's teeth"
+submenu = "fine_tuned_collisions"
+aliases = ["collideDragonTeethEnabled"]
+
+[[options]]
+id = "collide_hedgehogs"
+label = "Hedgehogs And Obstacles"
+type = "checkbox"
+default = true
+description = "Steel hedgehogs and obstacle frames"
+submenu = "fine_tuned_collisions"
+aliases = ["collideHedgehogsEnabled"]
+
+[[options]]
+id = "collide_barricades"
+label = "Barricades"
+type = "checkbox"
+default = true
+description = "Barricades, including cart barricades"
+submenu = "fine_tuned_collisions"
+aliases = ["collideBarricadesEnabled"]
+
+[[options]]
+id = "collide_low_walls"
+label = "Low Walls"
+type = "checkbox"
+default = false
+description = "Breastworks, wall sections and barrel walls. Off by default: maps lay them in lines as cover to climb over"
+submenu = "fine_tuned_collisions"
+aliases = ["collideLowWallsEnabled"]
+
+[[options]]
+id = "collide_fences"
+label = "Fences"
+type = "checkbox"
+default = false
+description = "Fences. Off by default: maps lay them in lines as cover to climb over"
+submenu = "fine_tuned_collisions"
+aliases = ["collideFencesEnabled"]
+
+[[options]]
+id = "collide_palisades"
+label = "Palisades"
+type = "checkbox"
+default = true
+description = "Wooden palisades"
+submenu = "fine_tuned_collisions"
+aliases = ["collidePalisadesEnabled"]
+
+[[options]]
+id = "collide_vehicles"
+label = "Vehicles And Wagons"
+type = "checkbox"
+default = true
+description = "Cars, trucks, tractors, tankers, carts, wagons and armoured trains"
+submenu = "fine_tuned_collisions"
+aliases = ["collideVehiclesEnabled"]
+
+[[options]]
+id = "collide_cannons"
+label = "Cannons"
+type = "checkbox"
+default = true
+description = "Cannons"
+submenu = "fine_tuned_collisions"
+aliases = ["collideCannonsEnabled"]
+
+[[options]]
+id = "collide_radar"
+label = "Radar Bases"
+type = "checkbox"
+default = true
+description = "Radar bases"
+submenu = "fine_tuned_collisions"
+aliases = ["collideRadarEnabled"]
+
+[[options]]
+id = "collide_stacks"
+label = "Stacks And Piles"
+type = "checkbox"
+default = true
+description = "Brick stacks, wood piles and plank piles"
+submenu = "fine_tuned_collisions"
+aliases = ["collideStacksEnabled"]
+
+[[options]]
+id = "collide_hay"
+label = "Hay"
+type = "checkbox"
+default = true
+description = "Haystacks and hay bales"
+submenu = "fine_tuned_collisions"
+aliases = ["collideHayEnabled"]
+
+[[options]]
+id = "collide_crates"
+label = "Crates And Barrels"
+type = "checkbox"
+default = true
+description = "Crates, barrels and wheelbarrows"
+submenu = "fine_tuned_collisions"
+aliases = ["collideCratesEnabled"]
+
+[[options]]
+id = "collide_tombs"
+label = "Tombs"
+type = "checkbox"
+default = true
+description = "Tombs and gravestones"
+submenu = "fine_tuned_collisions"
+aliases = ["collideTombsEnabled"]
+
+[[options]]
 id = "safe_destination"
 label = "Safer Destinations"
 type = "checkbox"
